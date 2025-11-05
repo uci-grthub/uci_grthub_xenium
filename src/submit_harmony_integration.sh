@@ -92,7 +92,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 . ~/.mymambainit-24.3.0
-mamba activate scvi-tools
+mamba activate squidpy
 
 # Loop over all provided prefixes and run the integration script once per prefix.
 for output_prefix in "$@"; do
