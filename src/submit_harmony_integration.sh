@@ -16,7 +16,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default parameters
-MIN_GENES=200
+MIN_GENES=20
 RUN_INTEGRATION=true
 
 # Simple argument parsing: allow optional --min_genes N followed by one or more output_prefix arguments

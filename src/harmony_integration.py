@@ -17,6 +17,7 @@ import os
 import argparse
 import scvi
 import grthub_tools as gt
+import ipdb
 
 
 # %% [markdown]
@@ -79,7 +80,6 @@ else:
         # Extract sample ID from the path (e.g., from /path/to/01001CM_011923/outs/filtered_feature_bc_matrix)
         sample_id = os.path.basename(os.path.dirname(os.path.dirname(data_path)))
         print(f"Processing sample {sample_id} from {data_path}")
-        
         # Read 10x data
         adata = gt.read_10x_data(data_path, min_genes=args.min_genes, min_cells=args.min_cells)
         
@@ -96,5 +96,5 @@ else:
     del adatas
 
 print(output_prefix)
-
+combined_adata = gt.preprocess_adata(combined_adata, n_top_genes=args.n_top_genes, batch = True)
 gt.integrate_w_harmony(combined_adata, output_prefix, min_genes = args.min_genes, min_cells = args.min_cells)
