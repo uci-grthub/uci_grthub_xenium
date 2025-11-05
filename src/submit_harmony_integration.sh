@@ -18,6 +18,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default parameters
 MIN_GENES=20
 RUN_INTEGRATION=true
+GROUPBY_VAR="condition"
+GROUP1_VALUE="heat_stress"
+GROUP2_VALUE="control"
 
 # Simple argument parsing: allow optional --min_genes N followed by one or more output_prefix arguments
 while [[ $# -gt 0 ]]; do
@@ -37,6 +40,7 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--help|-h)
 			echo "Usage: $0 [--min_genes N] output_prefix [output_prefix ...]"
+			echo "       Optional flags: --groupby-var NAME --group1 VAL --group2 VAL --no-integration"
 			echo
 			echo "Runs src/harmony_integration.py for each provided output_prefix."
 			echo
@@ -46,6 +50,30 @@ while [[ $# -gt 0 ]]; do
 			echo "  output/scanpy/output-XETG00221__0069982__Aged_cohort__20251003__181018/control"
 			echo "  output/scanpy/output-XETG00221__0069982__Aged_cohort__20251003__181018/heat_stress"
 			exit 0
+			;;
+		--groupby_var|--groupby-var)
+			if [[ -z "${2:-}" ]]; then
+				echo "Error: value required for $1" >&2
+				exit 2
+			fi
+			GROUPBY_VAR="$2"
+			shift 2
+			;;
+		--group1)
+			if [[ -z "${2:-}" ]]; then
+				echo "Error: value required for $1" >&2
+				exit 2
+			fi
+			GROUP1_VALUE="$2"
+			shift 2
+			;;
+		--group2)
+			if [[ -z "${2:-}" ]]; then
+				echo "Error: value required for $1" >&2
+				exit 2
+			fi
+			GROUP2_VALUE="$2"
+			shift 2
 			;;
 		-* )
 			echo "Unknown option: $1" >&2
@@ -84,7 +112,10 @@ for output_prefix in "$@"; do
 	# Use explicit if/else so the script continues even if one of these steps fails.
 	if papermill "src/inspect_integrated_anndata.ipynb" \
 		"$DIRNAME/inspect_integrated_anndata_${slug}.ipynb" \
-		-p combined_adata_path "$DIRNAME/${slug}_harmony_integrated.h5ad"; then
+		-p combined_adata_path "$DIRNAME/${slug}_harmony_integrated.h5ad" \
+		-p groupby_var "$GROUPBY_VAR" \
+		-p group1_value "$GROUP1_VALUE" \
+		-p group2_value "$GROUP2_VALUE"; then
 		echo "Papermill succeeded for ${slug}"
 	else
 		echo "Warning: papermill failed for ${slug}" >&2

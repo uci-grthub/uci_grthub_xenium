@@ -417,7 +417,9 @@ rule tenx_harmony_notebook:
         """
         mkdir -p {OUTPUT_DIR}/scanpy
         echo {input.integration_results}
-        {params.script} --no-integration --min-genes {params.min_genes} {params.output_prefix}
+        {params.script} --no-integration \
+        --min-genes {params.min_genes} \
+        {params.output_prefix}
         """
 
 
