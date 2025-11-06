@@ -1,2 +1,0 @@
-Filtered cells: 45520 -> 44231 (min_genes=200, mt<5.0%)
-Filtered genes: 33538 -> 25330 (min_cells=3)
