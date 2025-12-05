@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=6G
 #SBATCH --time=08:00:00
-#SBATCH --error=snakemake_master.%j.err
-#SBATCH --output=snakemake_master.%j.out
+#SBATCH --error=logs/scvi_integration_master.%j.err
+#SBATCH --output=logs/scvi_integration_master.%j.out
 
 # Small RNA processing workflow submission script
 python /scripts/tenx_scvi_integration.py --output_prefix output/scanpy/combined_filtered_tables

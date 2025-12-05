@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=6G
 #SBATCH --time=08:00:00
-#SBATCH --error=snakemake_master.%j.err
-#SBATCH --output=snakemake_master.%j.out
+#SBATCH --error=logs/harmony_integration_master.%j.err
+#SBATCH --output=logs/harmony_integration_master.%j.out
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIN_GENES=20
 RUN_INTEGRATION=true
 GROUPBY_VAR="condition"
-GROUP1_VALUE="heat_stress"
+GROUP1_VALUE="heatstress"
 GROUP2_VALUE="control"
 
 # Simple argument parsing: allow optional --min_genes N followed by one or more output_prefix arguments

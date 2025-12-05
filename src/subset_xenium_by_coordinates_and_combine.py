@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+
 import os
 import logging
 from pathlib import Path
@@ -30,6 +31,10 @@ from geopandas import GeoDataFrame
 import pandas as pd
 import anndata as ad
 import grthub_tools as gt
+from spatialdata import polygon_query
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from read_polygons_with_names import read_polygons_with_names
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,7 +70,9 @@ def main() -> None:
     xenium_dir = Path(args.xenium_dir)
     zarr_path = Path(str(xenium_dir) + ".zarr")
 
-        # Read polygon IDs and clean names
+    coordinates_file = os.path.join(xenium_dir, "coordinates.csv")
+
+    # Read polygon IDs and clean names
     polygon_ids = pd.read_csv(os.path.join(xenium_dir, "coordinates.csv"), skiprows=2).iloc[:, 0].unique()
 
     clean_name = lambda s: (
@@ -75,10 +82,10 @@ def main() -> None:
         .str.replace(" ", "_", regex=False)
     )
 
-    polygon_ids = clean_name(pd.Series(polygon_ids)).tolist()
+    polygon_ids = clean_name(pd.Series(polygon_ids)).tolist().sort()
 
-    # Read polygons selection
-    polygons = spatialdata_io.xenium_explorer_selection(os.path.join(xenium_dir, "coordinates.csv"), pixel_size=0.2125, return_list=False)
+    # NOTE: polygons will be read programmatically below (after metadata is loaded)
+    polygons = None
 
     if args.metadata is None:
         args.metadata = xenium_dir / "metadata.csv"
@@ -88,12 +95,27 @@ def main() -> None:
     if os.path.exists(metadata):
         sample_metadata = pd.read_csv(metadata)
         sample_metadata['condition'] = sample_metadata['sample_id'].str.replace(r'_[0-9]+', '', regex=True)
-
+        sample_metadata.sort_values(by='polygon_id', inplace=True)
+        sample_metadata.reset_index(drop=True, inplace=True)
+        
     # Build GeoDataFrame of selections
-    gdf = GeoDataFrame({"geometry": polygons})
-    gdf = pd.concat([gdf, sample_metadata], axis=1)
-    gdf = ShapesModel.parse(gdf, transformations={"aligned": Identity()})
+    # Read polygons from coordinates.csv using the helper. We do this here so
+    # we can align polygon order with sample_metadata if available.
+    polygons_dict = read_polygons_with_names(os.path.join(xenium_dir, "coordinates.csv"), pixel_size=0.2125, out_dir=None, save_csvs=False)
+
+    # Create an ordered list of geometries aligned to sample_metadata['polygon_id'] when possible
+    if 'sample_metadata' in locals() and sample_metadata is not None and 'polygon_id' in sample_metadata.columns:
+        cleaned_ids = clean_name(sample_metadata['polygon_id'].astype(str)).tolist()
+        geometries = [polygons_dict.get(pid) for pid in cleaned_ids]
+    else:
+        geometries = list(polygons_dict.values())
+
+    gdf = GeoDataFrame({"geometry": geometries})
+    if 'sample_metadata' in locals() and sample_metadata is not None:
+        gdf = pd.concat([gdf, sample_metadata.reset_index(drop=True)], axis=1)
     # gdf["polygon_id"] = polygon_ids
+    # gdf = pd.merge(gdf, sample_metadata, on = "polygon_id", how = "left")
+    gdf = ShapesModel.parse(gdf, transformations={"aligned": Identity()})
 
     # Convert to zarr if missing
     if not zarr_path.exists():
@@ -109,8 +131,6 @@ def main() -> None:
     except Exception:
         pass
 
-    from spatialdata import polygon_query
-    from collections import defaultdict
 
     filtered_tables_unmerged: dict[str, list[ad.AnnData]] = defaultdict(list)
     filtered_tables: dict[str, ad.AnnData] = {}
@@ -120,8 +140,12 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for sample_id in sample_metadata.sample_id.unique().tolist():
+        sdata["polygons"][sdata["polygons"].sample_id == sample_id].plot()
+        plt.savefig(out_dir / f"{sample_id}_polygons.png")
+        plt.close()
         for i, polygon in sdata["polygons"][sdata["polygons"].sample_id == sample_id].geometry.items():
-            table = polygon_query(sdata, polygon=polygon, target_coordinate_system="global")["table"]
+            myquery = polygon_query(sdata, polygon=polygon, target_coordinate_system="global")
+            table = myquery["table"]
 
             table.obs = table.obs.merge(sample_metadata.iloc[[i]], how="cross")
 

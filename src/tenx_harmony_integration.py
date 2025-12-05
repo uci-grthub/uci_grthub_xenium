@@ -100,5 +100,5 @@ else:
     del adatas
 
 print(output_prefix)
-
+combined_adata = gt.preprocess_adata(combined_adata, n_top_genes=args.n_top_genes, batch = True)
 gt.integrate_w_harmony(combined_adata, output_prefix)
