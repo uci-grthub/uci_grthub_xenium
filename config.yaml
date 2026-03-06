@@ -7,10 +7,6 @@
 # NOTE: Samples are now auto-detected from data/FASTQ directory
 # The following list is used as fallback if auto-detection fails
 samples:
-  - Medino_rooster_3NP5_1
-  - Medino_rooster_3NP5_2
-  - TC_med_4_7P5_1
-  - TC_med_4_7P5_2
 
 metadata: "data/metadata.csv"
 
