@@ -1,0 +1,22 @@
+channels:
+- conda-forge
+- bioconda
+dependencies:
+- squidpy
+- ipykernel
+- ca-certificates
+- certifi
+- openssl
+- pip:
+  - adjusttext==1.3.0
+  - et-xmlfile==2.0.0
+  - geodatasets==2026.1.0
+  - gseapy==1.1.12
+  - mizani==0.14.4
+  - openpyxl==3.1.5
+  - plotnine==0.15.3
+  - polars==1.38.1
+  - polars-runtime-32==1.38.1
+  - scikit-misc==0.5.2
+  - statsmodels==0.14.6
+name: squidpy_dfs

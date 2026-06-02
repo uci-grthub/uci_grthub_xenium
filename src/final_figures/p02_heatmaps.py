@@ -117,7 +117,7 @@ def logfc_heatmap_pdf(comparison: str, outfile: str, title: str) -> None:
         cmap        = FC_CMAP,
         norm        = norm,
         figsize     = (fig_w, fig_h),
-        row_cluster = True,
+        row_cluster = nrow > 1,
         col_cluster = False,
         linewidths  = 0,
         yticklabels = True,
