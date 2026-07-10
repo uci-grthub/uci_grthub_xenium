@@ -48,7 +48,3 @@ This repository provides a comprehensive Snakemake-based workflow for analyzing 
 - See `rules/README.md` for downstream analysis rules.
 
 For more information, contact the pipeline maintainers or consult the documentation files in this repository.
-
-## TODO
-
-fix scanpy concatenation issue 
