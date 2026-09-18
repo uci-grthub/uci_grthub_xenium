@@ -9,7 +9,9 @@ onsuccess:
 onerror:
    shell("mail -s 'ERROR' {EMAIL} < {log}")
 
+from collections import Counter
 from datetime import datetime
+import fnmatch
 import glob
 import os
 import re
@@ -79,64 +81,189 @@ def read_cytassist_run_info(path):
                 info[fields[0].strip()] = fields[1].strip()
     return info
 
-def find_fastq_dir(sample):
-    """Directory holding the R1 FASTQs for a sample, or None if not present."""
-    root = SPACERANGER.get("fastq_root", "data")
-    hits = glob.glob(os.path.join(root, "**", f"{sample}_S*_L*_R1_*.fastq.gz"),
-                     recursive=True)
-    return os.path.dirname(hits[0]) if hits else None
+def sanitize_run_id(text):
+    """Space Ranger --id only accepts [a-zA-Z0-9_-]+."""
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", text)
 
-def get_visiumhd_samples():
+def get_sample_override(sample_id, name, slide, area):
     """
-    Detect Visium HD capture areas from the CytAssist run folders.
+    Per-sample config overrides.
 
-    Each run folder holds a *-run-info.csv naming the slide and the sample
-    loaded in each capture area, plus one tif per area whose name ends in
-    _<area>_<sample>.tif. Samples without FASTQs on disk are skipped.
+    Keyed by Space Ranger id, by CytAssist sample name, or by <slide>_<area>;
+    the last is the only stable key when a sample name is reused across slides.
+    """
+    overrides = SPACERANGER.get("samples") or {}
+    for key in (sample_id, name, f"{slide}_{area}"):
+        if key in overrides:
+            return overrides[key] or {}
+    return {}
 
-    Returns a dict of sample -> {slide, area, cytaimage, image}.
+def find_fastq_dirs(prefix):
+    """
+    All directories holding R1 FASTQs for a FASTQ sample prefix, sorted.
+
+    A sample sequenced across several runs (e.g. a top-up) has one directory
+    per run; Space Ranger takes them as a comma-separated --fastqs list.
+    """
+    root = SPACERANGER.get("fastq_root", "data")
+    hits = glob.glob(os.path.join(root, "**", f"{prefix}_S*_L*_R1_*.fastq.gz"),
+                     recursive=True)
+    return sorted({os.path.dirname(path) for path in hits})
+
+def find_cytassist_image(run_dir, name, slide, area):
+    """
+    CytAssist image for a capture area, or None.
+
+    The instrument writes <serial>_<datetime>_<slide>_<area>_<sample>.tif, but
+    the sample name entered at the instrument sometimes already carries the
+    area, so try the most specific patterns first. Anchoring on the slide keeps
+    a sample name that is the suffix of another from matching the wrong file.
+    """
+    patterns = [
+        f"*_{slide}_{area}_{name}.tif",
+        f"*_{slide}_{name}.tif",
+        f"*_{area}_{name}.tif",
+        f"*_{name}.tif",
+    ]
+    for pattern in patterns:
+        hits = sorted(glob.glob(os.path.join(run_dir, pattern)))
+        if len(hits) > 1:
+            print(f"Warning: {len(hits)} CytAssist images match {pattern} in "
+                  f"{run_dir}; using {os.path.basename(hits[0])}")
+        if hits:
+            return hits[0]
+    return None
+
+def find_microscope_image(name, slide, area):
+    """
+    Microscope image for a capture area, or None.
+
+    spaceranger.microscope_image_pattern is a glob relative to
+    microscope_image_dir, in which {sample}, {slide} and {area} are
+    substituted, along with {token}: the first group captured from the sample
+    name by spaceranger.microscope_image_regex. In this project the capture
+    areas are named <area>_TMA<n> while the images are one per TMA, so the
+    regex pulls out <n> and the pattern is 'TMA {token}.tif'.
+    """
+    image_dir = SPACERANGER.get("microscope_image_dir")
+    if not image_dir:
+        return None
+
+    token = ""
+    token_re = SPACERANGER.get("microscope_image_regex")
+    if token_re:
+        m = re.search(token_re, name)
+        if not m:
+            return None
+        token = m.group(1) if m.groups() else m.group(0)
+
+    pattern = SPACERANGER.get("microscope_image_pattern", "*{sample}*.tif")
+    pattern = pattern.format(sample=name, slide=slide, area=area, token=token)
+
+    hits = sorted(glob.glob(os.path.join(image_dir, pattern)))
+    if not hits:
+        # globs are case sensitive, image extensions often are not
+        hits = sorted(os.path.join(image_dir, entry)
+                      for entry in os.listdir(image_dir)
+                      if fnmatch.fnmatch(entry.lower(), pattern.lower()))
+    return hits[0] if hits else None
+
+def collect_cytassist_areas():
+    """
+    Every capture area described by the CytAssist run folders.
+
+    Each folder holds a *-run-info.csv naming the slide and the sample loaded
+    in each capture area, plus one tif per area. Returns a list of
+    {slide, area, name, cytaimage} in slide order.
     """
     cytassist_dir = SPACERANGER.get("cytassist_dir")
     if not cytassist_dir or not os.path.isdir(cytassist_dir):
-        return {}
+        return []
 
-    overrides = SPACERANGER.get("samples") or {}
-    samples = {}
+    areas = []
     for run_dir in sorted(glob.glob(os.path.join(cytassist_dir, "*"))):
-        run_info_files = glob.glob(os.path.join(run_dir, "*-run-info.csv"))
+        run_info_files = sorted(glob.glob(os.path.join(run_dir, "*-run-info.csv")))
         if not run_info_files:
             continue
         info = read_cytassist_run_info(run_info_files[0])
         slide = info.get("Visium Slide ID")
 
-        for key, sample in info.items():
-            m = re.match(r"^Sample ([A-D]\d+)$", key)
-            if not m or not sample:
+        for key, name in sorted(info.items()):
+            m = re.match(r"^Sample ([A-Z]+\d+)$", key)
+            if not m or not name:
                 continue
             area = m.group(1)
 
-            cytaimages = glob.glob(os.path.join(run_dir, f"*_{sample}.tif"))
-            if not cytaimages:
-                print(f"Warning: no CytAssist image for {sample} ({area}) in {run_dir}")
+            cytaimage = find_cytassist_image(run_dir, name, slide, area)
+            if cytaimage is None:
+                print(f"Warning: no CytAssist image for {name} ({slide} {area}) "
+                      f"in {run_dir}; skipping")
                 continue
 
-            fastq_dir = find_fastq_dir(sample)
-            if fastq_dir is None:
-                continue
+            areas.append({"slide": slide, "area": area, "name": name,
+                          "cytaimage": cytaimage})
+    return areas
 
-            override = overrides.get(sample, {}) or {}
-            samples[sample] = {
-                # slide/area are read from the CytAssist image metadata; these
-                # are only passed to Space Ranger when set in the config
-                "slide": override.get("slide"),
-                "area": override.get("area"),
-                "run_slide": slide,
-                "run_area": area,
-                "cytaimage": override.get("cytaimage", cytaimages[0]),
-                "image": override.get("image"),
-                "loupe_alignment": override.get("loupe_alignment"),
-                "fastq_dir": fastq_dir,
-            }
+def get_visiumhd_samples():
+    """
+    Space Ranger inputs per capture area, keyed by run id.
+
+    A capture area is identified by its slide and area, not by the sample name
+    the operator typed, which is free text and may repeat across slides. The
+    run id is that name when it is unique and valid, and <name>_<slide>_<area>
+    otherwise. Capture areas without FASTQs on disk are skipped.
+    """
+    areas = collect_cytassist_areas()
+    name_counts = Counter(entry["name"] for entry in areas)
+
+    samples = {}
+    for entry in areas:
+        name, slide, area = entry["name"], entry["slide"], entry["area"]
+
+        if name_counts[name] > 1:
+            sample_id = sanitize_run_id(f"{name}_{slide}_{area}")
+            print(f"Warning: sample name '{name}' is used by {name_counts[name]} "
+                  f"capture areas; this one runs as '{sample_id}'")
+        else:
+            sample_id = sanitize_run_id(name)
+            if sample_id != name:
+                print(f"Note: sample name '{name}' runs as '{sample_id}' "
+                      f"(Space Ranger --id allows [a-zA-Z0-9_-] only)")
+
+        if sample_id in samples:
+            raise ValueError(f"Duplicate Space Ranger run id '{sample_id}'; set a "
+                             f"distinct id under spaceranger.samples")
+
+        override = get_sample_override(sample_id, name, slide, area)
+
+        fastq_prefix = override.get("fastq_prefix", name)
+        fastq_dirs = find_fastq_dirs(fastq_prefix)
+        if not fastq_dirs:
+            print(f"Warning: no FASTQs under "
+                  f"{SPACERANGER.get('fastq_root', 'data')} for '{fastq_prefix}' "
+                  f"({slide} {area}); skipping. Set spaceranger.samples."
+                  f"{slide}_{area}.fastq_prefix if the core named them differently")
+            continue
+
+        image = override.get("image") or find_microscope_image(name, slide, area)
+        if not image:
+            print(f"Warning: no microscope image for '{sample_id}'; running with "
+                  f"the CytAssist image only")
+
+        samples[sample_id] = {
+            # slide/area are read from the CytAssist image metadata; these are
+            # only passed to Space Ranger when set in the config
+            "slide": override.get("slide"),
+            "area": override.get("area"),
+            "run_slide": slide,
+            "run_area": area,
+            "name": name,
+            "cytaimage": override.get("cytaimage", entry["cytaimage"]),
+            "image": image,
+            "loupe_alignment": override.get("loupe_alignment"),
+            "fastq_prefix": fastq_prefix,
+            "fastq_dirs": fastq_dirs,
+        }
     return samples
 
 VISIUMHD_SAMPLES = get_visiumhd_samples()
@@ -175,6 +302,13 @@ rule all:
         # expand(f"{OUTPUT_DIR}/numbat/{{sample}}_allele_counts.tsv.gz", sample=SAMPLES),
         # # Numbat outputs
         # expand(f"{OUTPUT_DIR}/numbat/{{sample}}/done.txt", sample=SAMPLES)
+
+
+# Target rule: Visium HD counting only, without the single-cell downstream steps
+rule spaceranger_all:
+    input:
+        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html", sample=sorted(VISIUMHD_SAMPLES)),
+        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix", sample=sorted(VISIUMHD_SAMPLES))
 
 
 # Helper function to get FASTQ files for a sample
@@ -316,18 +450,19 @@ rule spaceranger_count:
     params:
         manifest = SPACERANGER.get("pixi_manifest", "envs/spaceranger/pixi.toml"),
         outdir = f"{OUTPUT_DIR}/spaceranger/{{sample}}",
-        fastq_dir = lambda wildcards: VISIUMHD_SAMPLES[wildcards.sample]["fastq_dir"],
+        fastq_dirs = lambda wildcards: ",".join(VISIUMHD_SAMPLES[wildcards.sample]["fastq_dirs"]),
+        fastq_prefix = lambda wildcards: VISIUMHD_SAMPLES[wildcards.sample]["fastq_prefix"],
         create_bam = str(SPACERANGER.get("create_bam", False)).lower(),
         localcores = SPACERANGER.get("localcores", 24),
         localmem = SPACERANGER.get("localmem", 112),
         extra = spaceranger_extra_args
-    threads: 24
+    threads: SPACERANGER.get("localcores", 24)
     resources:
-        mem_mb = 120000,  # 117GB in MB, fits any standard node
-        cpus = 24,
-        runtime = 2880,  # 48h
-        partition = "standard",
-        account = "sbsandme_lab"
+        mem_mb = SPACERANGER.get("mem_mb", 120000),  # 117GB, fits any standard node
+        cpus = SPACERANGER.get("localcores", 24),
+        runtime = SPACERANGER.get("runtime", 2880),  # 48h
+        partition = SPACERANGER.get("partition", "standard"),
+        account = SPACERANGER.get("account", "sbsandme_lab")
     log:
         f"{OUTPUT_DIR}/logs/spaceranger_{{sample}}.log"
     shell:
@@ -340,8 +475,8 @@ rule spaceranger_count:
             --output-dir={params.outdir} \
             --transcriptome={input.transcriptome} \
             --probe-set={input.probe_set} \
-            --fastqs={params.fastq_dir} \
-            --sample={wildcards.sample} \
+            --fastqs={params.fastq_dirs} \
+            --sample={params.fastq_prefix} \
             --cytaimage="{input.cytaimage}" \
             --create-bam={params.create_bam} \
             --localcores={params.localcores} \

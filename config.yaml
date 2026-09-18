@@ -36,20 +36,32 @@ spaceranger:
   pixi_manifest: "envs/spaceranger/pixi.toml"
   transcriptome: "/dfs8/commondata/spaceranger/ref/refdata-gex-GRCh38-2020-A"
   probe_set: "/dfs8/commondata/spaceranger/probe/Human_V2/Visium_Human_Transcriptome_Probe_Set_v2.0_GRCh38-2020-A.csv"
-  # searched recursively for <sample>_S*_L*_R1_*.fastq.gz
+  # searched recursively for <fastq_prefix>_S*_L*_R1_*.fastq.gz
   fastq_root: "data"
   # CytAssist run folders: each holds a *-run-info.csv plus one tif per capture area
   cytassist_dir: "metadata/H_E_images_out_0526I_16/CytAssist"
+  # microscope images. The pattern is a glob relative to microscope_image_dir in
+  # which {sample}, {slide}, {area} and {token} are substituted; {token} is the
+  # first group captured from the sample name by microscope_image_regex. Here the
+  # capture areas are <area>_TMA<n> and the images are one per TMA.
+  microscope_image_dir: "metadata/H_E_images_out_0526I_16/TIFF"
+  microscope_image_regex: "TMA\\s*(\\d+)$"
+  microscope_image_pattern: "TMA {token}.tif"
   create_bam: false
   localcores: 24
   localmem: 112  # GB
   # extra bin size in microns, in addition to the standard 2/8/16 um (null = none)
   custom_bin_size:
-  # per-sample overrides; slide and area are read from the CytAssist image
-  # metadata unless set here
-  samples:
-    A1_TMA4:
-      image: "metadata/H_E_images_out_0526I_16/TIFF/TMA 4.tif"
+  # Slurm resources for one capture area
+  mem_mb: 120000
+  runtime: 2880  # minutes
+  partition: "standard"
+  account: "sbsandme_lab"
+  # Per-sample overrides, keyed by run id, by CytAssist sample name, or by
+  # <slide>_<area> (the only stable key when a name repeats across slides).
+  # Recognised: fastq_prefix, image, cytaimage, loupe_alignment, and slide+area
+  # (which add --override-id, for when the CytAssist metadata is known wrong).
+  samples: {}
 
 # scVI integration parameters
 min_genes: 200
