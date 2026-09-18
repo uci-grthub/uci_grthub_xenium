@@ -23,3 +23,5 @@ results/
 weblinks.txt
 .codetree/
 geo_staging/
+scripts/rsync_visiumhd_fastqs.sh
+.pixi/

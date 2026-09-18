@@ -10,7 +10,6 @@ onerror:
    shell("mail -s 'ERROR' {EMAIL} < {log}")
 
 from datetime import datetime
-import loompy
 import glob
 import os
 import re
@@ -62,12 +61,88 @@ def get_samples_from_fastq_dir():
 # Extract sample list and configuration
 # Use auto-detected samples if available, otherwise fall back to config
 auto_samples = get_samples_from_fastq_dir()
-SAMPLES = auto_samples if auto_samples else config.get("samples", [])
+SAMPLES = auto_samples if auto_samples else (config.get("samples") or [])
 FASTQ_DIR = config.get("paths", {}).get("fastqs", "data/FASTQ")
 TRANSCRIPTOME = config["references"]["transcriptome"]
 OUTPUT_DIR = config["paths"]["output"]
 
+# Visium HD / Space Ranger configuration
+SPACERANGER = config.get("spaceranger", {})
+
+def read_cytassist_run_info(path):
+    """Parse a CytAssist *-run-info.csv into a key -> value dict."""
+    info = {}
+    with open(path) as handle:
+        for line in handle:
+            fields = line.rstrip("\n").split(",")
+            if len(fields) >= 2:
+                info[fields[0].strip()] = fields[1].strip()
+    return info
+
+def find_fastq_dir(sample):
+    """Directory holding the R1 FASTQs for a sample, or None if not present."""
+    root = SPACERANGER.get("fastq_root", "data")
+    hits = glob.glob(os.path.join(root, "**", f"{sample}_S*_L*_R1_*.fastq.gz"),
+                     recursive=True)
+    return os.path.dirname(hits[0]) if hits else None
+
+def get_visiumhd_samples():
+    """
+    Detect Visium HD capture areas from the CytAssist run folders.
+
+    Each run folder holds a *-run-info.csv naming the slide and the sample
+    loaded in each capture area, plus one tif per area whose name ends in
+    _<area>_<sample>.tif. Samples without FASTQs on disk are skipped.
+
+    Returns a dict of sample -> {slide, area, cytaimage, image}.
+    """
+    cytassist_dir = SPACERANGER.get("cytassist_dir")
+    if not cytassist_dir or not os.path.isdir(cytassist_dir):
+        return {}
+
+    overrides = SPACERANGER.get("samples") or {}
+    samples = {}
+    for run_dir in sorted(glob.glob(os.path.join(cytassist_dir, "*"))):
+        run_info_files = glob.glob(os.path.join(run_dir, "*-run-info.csv"))
+        if not run_info_files:
+            continue
+        info = read_cytassist_run_info(run_info_files[0])
+        slide = info.get("Visium Slide ID")
+
+        for key, sample in info.items():
+            m = re.match(r"^Sample ([A-D]\d+)$", key)
+            if not m or not sample:
+                continue
+            area = m.group(1)
+
+            cytaimages = glob.glob(os.path.join(run_dir, f"*_{sample}.tif"))
+            if not cytaimages:
+                print(f"Warning: no CytAssist image for {sample} ({area}) in {run_dir}")
+                continue
+
+            fastq_dir = find_fastq_dir(sample)
+            if fastq_dir is None:
+                continue
+
+            override = overrides.get(sample, {}) or {}
+            samples[sample] = {
+                # slide/area are read from the CytAssist image metadata; these
+                # are only passed to Space Ranger when set in the config
+                "slide": override.get("slide"),
+                "area": override.get("area"),
+                "run_slide": slide,
+                "run_area": area,
+                "cytaimage": override.get("cytaimage", cytaimages[0]),
+                "image": override.get("image"),
+                "loupe_alignment": override.get("loupe_alignment"),
+                "fastq_dir": fastq_dir,
+            }
+    return samples
+
+VISIUMHD_SAMPLES = get_visiumhd_samples()
+
 # Print detected samples for debugging
+print(f"Visium HD samples: {sorted(VISIUMHD_SAMPLES)}")
 print(f"Auto-detected samples: {auto_samples}")
 print(f"Using samples: {SAMPLES}")
 print(f"FASTQ directory: {FASTQ_DIR}")
@@ -76,6 +151,9 @@ print(f"Number of samples to process: {len(SAMPLES)}")
 # Rule all - defines final outputs for all samples
 rule all:
     input:
+        # Visium HD outputs
+        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html", sample=sorted(VISIUMHD_SAMPLES)),
+        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix", sample=sorted(VISIUMHD_SAMPLES)),
         expand(f"{OUTPUT_DIR}/cellranger/{{sample}}/outs/web_summary.html", sample=SAMPLES),
         expand(f"{OUTPUT_DIR}/cellranger/{{sample}}/outs/filtered_feature_bc_matrix", sample=SAMPLES),
         f"{OUTPUT_DIR}/multi_sample_summary.csv",
@@ -83,17 +161,12 @@ rule all:
         f"{OUTPUT_DIR}/scanpy/inspect_integrated_anndata_combined.ipynb",
         # per-sample filtering timeline plots
         expand(f"{OUTPUT_DIR}/qc/filtering_timeline/{{sample}}.png", sample=SAMPLES)
-        # loompy outputs
-        # expand(f"{OUTPUT_DIR}/loom/{{sample}}.loom", sample=SAMPLES),
         # scenic outputs
         # expand(f"{OUTPUT_DIR}/scenic/{{sample}}.loom", sample=SAMPLES),
         # # CellBender outputs
         # expand(f"{OUTPUT_DIR}/cellbender/{{sample}}_filtered.h5", sample=SAMPLES),
         # Scrublet outputs
         # expand(f"{OUTPUT_DIR}/scrublet/{{sample}}_doublets.csv", sample=SAMPLES)
-        # # Seurat outputs
-        # expand(f"{OUTPUT_DIR}/seurat/{{sample}}_seu.rds", sample=SAMPLES),
-        # expand(f"{OUTPUT_DIR}/seurat/{{sample}}_embeddings.csv", sample=SAMPLES),
         # # Velocyto outputs
         # expand(f"{OUTPUT_DIR}/velocyto/{{sample}}.loom", sample=SAMPLES)
         # # scVelo outputs
@@ -203,6 +276,78 @@ rule cellranger_count:
         mv {params.sample_id} {params.output_dir}/cellranger/{params.sample_id}
         
         module unload cellranger/8.0.1
+        """
+
+
+# Rule: Space Ranger count for each Visium HD capture area
+def spaceranger_input(sample, key):
+    """Optional per-sample input file, or [] when not configured."""
+    value = VISIUMHD_SAMPLES[sample].get(key)
+    return value if value else []
+
+def spaceranger_extra_args(wildcards, input):
+    """Assemble the optional Space Ranger flags for a sample."""
+    meta = VISIUMHD_SAMPLES[wildcards.sample]
+    args = []
+    if input.image:
+        args.append(f'--image="{input.image}"')
+    if input.loupe_alignment:
+        args.append(f'--loupe-alignment="{input.loupe_alignment}"')
+    if meta.get("slide") and meta.get("area"):
+        # only set when the CytAssist image metadata is known to be wrong
+        args.append(f'--slide={meta["slide"]} --area={meta["area"]} --override-id')
+    bin_size = SPACERANGER.get("custom_bin_size")
+    if bin_size:
+        args.append(f"--custom-bin-size={bin_size}")
+    return " ".join(args)
+
+rule spaceranger_count:
+    input:
+        transcriptome = SPACERANGER.get("transcriptome", ""),
+        probe_set = SPACERANGER.get("probe_set", ""),
+        cytaimage = lambda wildcards: spaceranger_input(wildcards.sample, "cytaimage"),
+        image = lambda wildcards: spaceranger_input(wildcards.sample, "image"),
+        loupe_alignment = lambda wildcards: spaceranger_input(wildcards.sample, "loupe_alignment")
+    output:
+        web_summary = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html",
+        metrics_summary = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/metrics_summary.csv",
+        filtered_matrix_h5 = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix.h5",
+        filtered_matrix_dir = directory(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix")
+    params:
+        manifest = SPACERANGER.get("pixi_manifest", "envs/spaceranger/pixi.toml"),
+        outdir = f"{OUTPUT_DIR}/spaceranger/{{sample}}",
+        fastq_dir = lambda wildcards: VISIUMHD_SAMPLES[wildcards.sample]["fastq_dir"],
+        create_bam = str(SPACERANGER.get("create_bam", False)).lower(),
+        localcores = SPACERANGER.get("localcores", 24),
+        localmem = SPACERANGER.get("localmem", 112),
+        extra = spaceranger_extra_args
+    threads: 24
+    resources:
+        mem_mb = 120000,  # 117GB in MB, fits any standard node
+        cpus = 24,
+        runtime = 2880,  # 48h
+        partition = "standard",
+        account = "sbsandme_lab"
+    log:
+        f"{OUTPUT_DIR}/logs/spaceranger_{{sample}}.log"
+    shell:
+        """
+        mkdir -p {OUTPUT_DIR}/logs
+        rm -rf {params.outdir}
+
+        pixi run --manifest-path {params.manifest} spaceranger count \
+            --id={wildcards.sample} \
+            --output-dir={params.outdir} \
+            --transcriptome={input.transcriptome} \
+            --probe-set={input.probe_set} \
+            --fastqs={params.fastq_dir} \
+            --sample={wildcards.sample} \
+            --cytaimage="{input.cytaimage}" \
+            --create-bam={params.create_bam} \
+            --localcores={params.localcores} \
+            --localmem={params.localmem} \
+            --disable-ui \
+            {params.extra} > {log} 2>&1
         """
 
 
@@ -452,47 +597,6 @@ rule plot_filtering_timeline:
             --out {output.png}
         """
 
-# Rule: loompy
-rule loompy:
-    input:
-        folder = f"{OUTPUT_DIR}/cellranger/{{sample}}"
-    output:
-        loom_file = f"{OUTPUT_DIR}/loom/{{sample}}.loom"
-    resources:
-        mem_mb = 8000,  # 8GB for loompy
-        cpus = 4,
-        partition = "standard"
-    threads: 4
-    run:
-        loompy.create_from_cellranger(input.folder, f"{OUTPUT_DIR}/loom", genome="hg38")
-
-# Rule: Seurat
-rule seurat:
-    input:
-        matrix_dir = f"{OUTPUT_DIR}/{{sample}}/outs/filtered_feature_bc_matrix/",
-        script = "src/process_seurat.R"
-    output:
-        seu_path = f"{OUTPUT_DIR}/seurat/{{sample}}_seu.rds"
-    log:
-        f"{OUTPUT_DIR}/logs/seurat_{{sample}}.log"
-    threads: 4
-    shell:
-        '''Rscript {input.script} matrix_dir="{input.matrix_dir}" seu_path="{output.seu_path}" celltype_ref="config['celltype_ref']" > {log} 2>&1'''
-
-# Rule: Save Seurat embeddings
-rule seurat_embeddings:
-    input:
-        seu_path = f"{OUTPUT_DIR}/seurat/{{sample}}_seu.rds",
-        nb_path = f"{OUTPUT_DIR}/numbat/{{sample}}_numbat.rds",
-        script = "src/save_seurat_embeddings.R"
-    output:
-        seurat_embeddings = f"{OUTPUT_DIR}/seurat/{{sample}}_embeddings.csv"
-    log:
-        f"{OUTPUT_DIR}/logs/seurat_{{sample}}_embeddings.log"
-    threads: 2
-    shell:
-        '''Rscript {input.script} seu_path="{input.seu_path}" nb_path="{input.nb_path}" > {log} 2>&1'''
-
 # Rule: Velocyto
 rule velocyto:
     input:
@@ -530,19 +634,6 @@ rule pileup_and_phasing:
     threads: 4
     shell:
         '''Rscript {input.script} --label {wildcards.sample} --samples {wildcards.sample} --bams {input.bam} --barcodes {input.barcodes} --gmap config["gmap"] --snpvcf config["snpvcf"] --paneldir config["paneldir"] --outdir {OUTPUT_DIR}/numbat/{wildcards.sample} --ncores {threads}'''
-
-# Rule: Numbat
-rule numbat:
-    input:
-        allele_df = f"{OUTPUT_DIR}/numbat/{{sample}}_allele_counts.tsv.gz",
-        matrix_file = f"{OUTPUT_DIR}/{{sample}}/outs/filtered_feature_bc_matrix/matrix.mtx.gz",
-        seu_path = f"{OUTPUT_DIR}/seurat/{{sample}}_seu.rds",
-        script = "src/run_numbat.R"
-    output:
-        done_file = f"{OUTPUT_DIR}/numbat/{{sample}}/done.txt"
-    threads: 4
-    shell:
-        '''Rscript {input.script} seu_path="{input.seu_path}" ref_path=config["ref_path"] tau=config["tau"] read_prop=config["read_prop"] max_iter=config["max_iter"] min_LLR=config["min_LLR"] t=config["numbat_t"] cell_ceiling=config["cell_ceiling"] max_entropy=config["max_entropy"] allele_df="{input.allele_df}" matrix_file="{input.matrix_file}" out_dir="{OUTPUT_DIR}/numbat/{{wildcards.sample}}" ncores={threads} rprof_out={OUTPUT_DIR}/numbat/{{wildcards.sample}}/log.prof > {output.done_file} 2>&1'''
 
 # Rule: SCENIC analysis
 include: "rules/scenic.smk"

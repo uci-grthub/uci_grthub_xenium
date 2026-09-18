@@ -30,7 +30,28 @@ params:
   localmem: 128  # GB
   chemistry: "SC3Pv4"
 
-# scVI integration parameters  
+# Space Ranger (Visium HD) parameters
+spaceranger:
+  # pixi manifest that puts the cluster-wide Space Ranger install on PATH
+  pixi_manifest: "envs/spaceranger/pixi.toml"
+  transcriptome: "/dfs8/commondata/spaceranger/ref/refdata-gex-GRCh38-2020-A"
+  probe_set: "/dfs8/commondata/spaceranger/probe/Human_V2/Visium_Human_Transcriptome_Probe_Set_v2.0_GRCh38-2020-A.csv"
+  # searched recursively for <sample>_S*_L*_R1_*.fastq.gz
+  fastq_root: "data"
+  # CytAssist run folders: each holds a *-run-info.csv plus one tif per capture area
+  cytassist_dir: "metadata/H_E_images_out_0526I_16/CytAssist"
+  create_bam: false
+  localcores: 24
+  localmem: 112  # GB
+  # extra bin size in microns, in addition to the standard 2/8/16 um (null = none)
+  custom_bin_size:
+  # per-sample overrides; slide and area are read from the CytAssist image
+  # metadata unless set here
+  samples:
+    A1_TMA4:
+      image: "metadata/H_E_images_out_0526I_16/TIFF/TMA 4.tif"
+
+# scVI integration parameters
 min_genes: 200
 min_cells: 5
 mt_thresh: 5
