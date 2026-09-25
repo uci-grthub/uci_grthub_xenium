@@ -183,7 +183,37 @@ rule xenium_anndata_all:
     input:
         expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad", sample=sorted(XENIUM_SAMPLES)),
         expand(f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}/markers.csv",
-               sample=sorted(XENIUM_SAMPLES))
+               sample=sorted(XENIUM_SAMPLES)),
+        f"{OUTPUT_DIR}/xenium/anndata/merged/merged.h5ad"
+
+
+# Rule: all samples in one AnnData, re-normalized from raw counts with the
+# same fixed xenium.target_area;
+# see src/merge_xenium_anndata.py
+rule xenium_merge:
+    input:
+        h5ads = expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
+                       sample=sorted(XENIUM_SAMPLES))
+    output:
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/merged/merged.h5ad"
+    log:
+        "logs/xenium_merge.log"
+    params:
+        script = "src/merge_xenium_anndata.py",
+        python = XENIUM.get("python", "python"),
+        target_area = XENIUM.get("target_area", 100),
+        min_cells = XENIUM.get("min_cells", 5),
+        resolution = XENIUM.get("leiden_resolution", 0.3)
+    threads: 8
+    resources:
+        mem_mb = 96000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} \
+            --h5ads {input.h5ads} --out {output.h5ad} --target-area {params.target_area} \
+            --min-cells {params.min_cells} --resolution {params.resolution} \
+            --target-area {params.target_area} > {log} 2>&1
+        """
 
 
 XENIUM_PLOTS = ["qc_violin.png", "qc_spatial.png", "pca_variance.png", "umap_qc.png",
@@ -227,6 +257,7 @@ rule xenium_anndata:
         xenium_dir = lambda wildcards: XENIUM_SAMPLES[wildcards.sample]["dir"],
         python = XENIUM.get("python", "python"),
         min_genes = XENIUM.get("min_genes", 10),
+        target_area = XENIUM.get("target_area", 100),
         min_cells = XENIUM.get("min_cells", 5),
         resolution = XENIUM.get("leiden_resolution", 0.3)
     threads: 4

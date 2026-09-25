@@ -39,6 +39,9 @@ xenium:
   min_genes: 10
   min_cells: 5
   leiden_resolution: 0.3
+  # normalization: counts / cell_area * target_area (µm²), then log1p; one
+  # constant for every sample and the merged object (like Seurat scale.factor)
+  target_area: 100
 
 # scVI integration parameters
 min_genes: 200

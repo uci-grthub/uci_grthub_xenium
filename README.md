@@ -94,7 +94,8 @@ runs every sample inside one 16-core allocation) writes
    stream") for 12 of 15 regions, so the CSV is used.
 2. Keep cells with at least 10 genes (`xenium.min_genes`) and genes seen in at
    least 5 cells (`xenium.min_cells`).
-3. Normalize by cell size: counts / `cell_area` x median `cell_area`, then
+3. Normalize by cell size: counts / `cell_area` x 100 µm²
+   (`xenium.target_area`, a fixed constant like Seurat's `scale.factor`), then
    `log1p`.
 4. PCA (30 PCs), neighbors, UMAP, Leiden (`xenium.leiden_resolution`, 0.3).
 
@@ -103,6 +104,20 @@ per-cell scale in `obs["size_factor"]`, and Xenium's own total (genes plus
 controls) in `obs["xenium_total_counts"]`. Because genes are filtered per
 sample, `var` differs between samples; concatenate with `join="outer"` or
 re-filter from `layers["counts"]`.
+
+### Merged AnnData
+
+The same target also writes `output/xenium/anndata/merged/merged.h5ad` with
+`src/merge_xenium_anndata.py`. Every sample is rebuilt from
+`layers["counts"]` (per-sample normalization is discarded), genes are
+outer-joined, and all cells are normalized with the same fixed
+`xenium.target_area` (100 µm²) as the per-sample objects. Any other merging
+code should call `cell_size_normalize()` from `src/xenium_to_anndata.py`
+with that constant, never a per-sample median.
+
+PCA/UMAP/Leiden run on the merged object with no batch correction
+(`obs["sample_id"]` is the batch); per-sample clusters are kept as
+`obs["leiden_sample"]`.
 
 Other downstream analysis of the region outputs is done in notebooks: see `src/read_in_xenium.ipynb`, `src/samui_xenium_process.py` and
 `src/subset_xenium_by_coordinates_and_combine.py`.
