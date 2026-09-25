@@ -1,5 +1,5 @@
-# Multi-sample CellRanger Snakemake workflow
-# For processing multiple single-cell RNA-seq samples
+# Snakemake workflow for Xenium runs (plus idle single-cell Cell Ranger rules)
+# Xenium outputs are discovered under xenium.data_root; see README.md
 
 EMAIL = "kstachel@uci.edu"
 onstart:
@@ -9,9 +9,6 @@ onsuccess:
 onerror:
    shell("mail -s 'ERROR' {EMAIL} < {log}")
 
-from collections import Counter
-from datetime import datetime
-import fnmatch
 import glob
 import os
 import re
@@ -68,247 +65,181 @@ FASTQ_DIR = config.get("paths", {}).get("fastqs", "data/FASTQ")
 TRANSCRIPTOME = config["references"]["transcriptome"]
 OUTPUT_DIR = config["paths"]["output"]
 
-# Visium HD / Space Ranger configuration
-SPACERANGER = config.get("spaceranger", {})
+# Xenium configuration
+XENIUM = config.get("xenium", {})
 
-def read_cytassist_run_info(path):
-    """Parse a CytAssist *-run-info.csv into a key -> value dict."""
-    info = {}
-    with open(path) as handle:
-        for line in handle:
-            fields = line.rstrip("\n").split(",")
-            if len(fields) >= 2:
-                info[fields[0].strip()] = fields[1].strip()
-    return info
-
-def sanitize_run_id(text):
-    """Space Ranger --id only accepts [a-zA-Z0-9_-]+."""
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", text)
-
-def get_sample_override(sample_id, name, slide, area):
+def get_xenium_samples():
     """
-    Per-sample config overrides.
+    Xenium output directories under xenium.data_root, keyed by sample id.
 
-    Keyed by Space Ranger id, by CytAssist sample name, or by <slide>_<area>;
-    the last is the only stable key when a sample name is reused across slides.
+    Each region on a slide is delivered as one output-XETG* directory holding
+    an experiment.xenium manifest; the instrument has already run the onboard
+    analysis, so there is nothing to count. The sample id is
+    <slide>_<region name>, which stays unique when a region name is reused on
+    a second slide.
     """
-    overrides = SPACERANGER.get("samples") or {}
-    for key in (sample_id, name, f"{slide}_{area}"):
-        if key in overrides:
-            return overrides[key] or {}
-    return {}
+    import json
 
-def find_fastq_dirs(prefix):
-    """
-    All directories holding R1 FASTQs for a FASTQ sample prefix, sorted.
-
-    A sample sequenced across several runs (e.g. a top-up) has one directory
-    per run; Space Ranger takes them as a comma-separated --fastqs list.
-    """
-    root = SPACERANGER.get("fastq_root", "data")
-    hits = glob.glob(os.path.join(root, "**", f"{prefix}_S*_L*_R1_*.fastq.gz"),
-                     recursive=True)
-    return sorted({os.path.dirname(path) for path in hits})
-
-def find_cytassist_image(run_dir, name, slide, area):
-    """
-    CytAssist image for a capture area, or None.
-
-    The instrument writes <serial>_<datetime>_<slide>_<area>_<sample>.tif, but
-    the sample name entered at the instrument sometimes already carries the
-    area, so try the most specific patterns first. Anchoring on the slide keeps
-    a sample name that is the suffix of another from matching the wrong file.
-    """
-    patterns = [
-        f"*_{slide}_{area}_{name}.tif",
-        f"*_{slide}_{name}.tif",
-        f"*_{area}_{name}.tif",
-        f"*_{name}.tif",
-    ]
-    for pattern in patterns:
-        hits = sorted(glob.glob(os.path.join(run_dir, pattern)))
-        if len(hits) > 1:
-            print(f"Warning: {len(hits)} CytAssist images match {pattern} in "
-                  f"{run_dir}; using {os.path.basename(hits[0])}")
-        if hits:
-            return hits[0]
-    return None
-
-def find_microscope_image(name, slide, area):
-    """
-    Microscope image for a capture area, or None.
-
-    spaceranger.microscope_image_pattern is a glob relative to
-    microscope_image_dir, in which {sample}, {slide} and {area} are
-    substituted, along with {token}: the first group captured from the sample
-    name by spaceranger.microscope_image_regex. In this project the capture
-    areas are named <area>_TMA<n> while the images are one per TMA, so the
-    regex pulls out <n> and the pattern is 'TMA {token}.tif'.
-    """
-    image_dir = SPACERANGER.get("microscope_image_dir")
-    if not image_dir:
-        return None
-
-    token = ""
-    token_re = SPACERANGER.get("microscope_image_regex")
-    if token_re:
-        m = re.search(token_re, name)
-        if not m:
-            return None
-        token = m.group(1) if m.groups() else m.group(0)
-
-    pattern = SPACERANGER.get("microscope_image_pattern", "*{sample}*.tif")
-    pattern = pattern.format(sample=name, slide=slide, area=area, token=token)
-
-    hits = sorted(glob.glob(os.path.join(image_dir, pattern)))
-    if not hits:
-        # globs are case sensitive, image extensions often are not
-        hits = sorted(os.path.join(image_dir, entry)
-                      for entry in os.listdir(image_dir)
-                      if fnmatch.fnmatch(entry.lower(), pattern.lower()))
-    return hits[0] if hits else None
-
-def collect_cytassist_areas():
-    """
-    Every capture area described by the CytAssist run folders.
-
-    Each folder holds a *-run-info.csv naming the slide and the sample loaded
-    in each capture area, plus one tif per area. Returns a list of
-    {slide, area, name, cytaimage} in slide order.
-    """
-    cytassist_dir = SPACERANGER.get("cytassist_dir")
-    if not cytassist_dir or not os.path.isdir(cytassist_dir):
-        return []
-
-    areas = []
-    for run_dir in sorted(glob.glob(os.path.join(cytassist_dir, "*"))):
-        run_info_files = sorted(glob.glob(os.path.join(run_dir, "*-run-info.csv")))
-        if not run_info_files:
-            continue
-        info = read_cytassist_run_info(run_info_files[0])
-        slide = info.get("Visium Slide ID")
-
-        for key, name in sorted(info.items()):
-            m = re.match(r"^Sample ([A-Z]+\d+)$", key)
-            if not m or not name:
-                continue
-            area = m.group(1)
-
-            cytaimage = find_cytassist_image(run_dir, name, slide, area)
-            if cytaimage is None:
-                print(f"Warning: no CytAssist image for {name} ({slide} {area}) "
-                      f"in {run_dir}; skipping")
-                continue
-
-            areas.append({"slide": slide, "area": area, "name": name,
-                          "cytaimage": cytaimage})
-    return areas
-
-def get_visiumhd_samples():
-    """
-    Space Ranger inputs per capture area, keyed by run id.
-
-    A capture area is identified by its slide and area, not by the sample name
-    the operator typed, which is free text and may repeat across slides. The
-    run id is that name when it is unique and valid, and <name>_<slide>_<area>
-    otherwise. Capture areas without FASTQs on disk are skipped.
-    """
-    areas = collect_cytassist_areas()
-    name_counts = Counter(entry["name"] for entry in areas)
-
+    root = XENIUM.get("data_root", "data")
     samples = {}
-    for entry in areas:
-        name, slide, area = entry["name"], entry["slide"], entry["area"]
-
-        if name_counts[name] > 1:
-            sample_id = sanitize_run_id(f"{name}_{slide}_{area}")
-            print(f"Warning: sample name '{name}' is used by {name_counts[name]} "
-                  f"capture areas; this one runs as '{sample_id}'")
-        else:
-            sample_id = sanitize_run_id(name)
-            if sample_id != name:
-                print(f"Note: sample name '{name}' runs as '{sample_id}' "
-                      f"(Space Ranger --id allows [a-zA-Z0-9_-] only)")
-
+    for manifest in sorted(glob.glob(os.path.join(root, "**", "experiment.xenium"),
+                                     recursive=True)):
+        outdir = os.path.dirname(manifest)
+        with open(manifest) as handle:
+            meta = json.load(handle)
+        region = meta.get("region_name") or os.path.basename(outdir)
+        slide = meta.get("slide_id") or ""
+        sample_id = f"{slide}_{region}" if slide else region
         if sample_id in samples:
-            raise ValueError(f"Duplicate Space Ranger run id '{sample_id}'; set a "
-                             f"distinct id under spaceranger.samples")
-
-        override = get_sample_override(sample_id, name, slide, area)
-
-        fastq_prefix = override.get("fastq_prefix", name)
-        fastq_dirs = find_fastq_dirs(fastq_prefix)
-        if not fastq_dirs:
-            print(f"Warning: no FASTQs under "
-                  f"{SPACERANGER.get('fastq_root', 'data')} for '{fastq_prefix}' "
-                  f"({slide} {area}); skipping. Set spaceranger.samples."
-                  f"{slide}_{area}.fastq_prefix if the core named them differently")
-            continue
-
-        image = override.get("image") or find_microscope_image(name, slide, area)
-        if not image:
-            print(f"Warning: no microscope image for '{sample_id}'; running with "
-                  f"the CytAssist image only")
-
-        samples[sample_id] = {
-            # slide/area are read from the CytAssist image metadata; these are
-            # only passed to Space Ranger when set in the config
-            "slide": override.get("slide"),
-            "area": override.get("area"),
-            "run_slide": slide,
-            "run_area": area,
-            "name": name,
-            "cytaimage": override.get("cytaimage", entry["cytaimage"]),
-            "image": image,
-            "loupe_alignment": override.get("loupe_alignment"),
-            "fastq_prefix": fastq_prefix,
-            "fastq_dirs": fastq_dirs,
-        }
+            raise ValueError(f"Duplicate Xenium sample id '{sample_id}': "
+                             f"{samples[sample_id]['dir']} and {outdir}")
+        samples[sample_id] = {"dir": outdir, "slide": slide, "region": region}
     return samples
 
-VISIUMHD_SAMPLES = get_visiumhd_samples()
+XENIUM_SAMPLES = get_xenium_samples()
 
 # Print detected samples for debugging
-print(f"Visium HD samples: {sorted(VISIUMHD_SAMPLES)}")
+print(f"Xenium samples ({len(XENIUM_SAMPLES)}): {sorted(XENIUM_SAMPLES)}")
 print(f"Auto-detected samples: {auto_samples}")
 print(f"Using samples: {SAMPLES}")
 print(f"FASTQ directory: {FASTQ_DIR}")
 print(f"Number of samples to process: {len(SAMPLES)}")
 
+def xenium_file(name):
+    """Input function: <name> inside a Xenium sample's output directory."""
+    return lambda wildcards: os.path.join(XENIUM_SAMPLES[wildcards.sample]["dir"], name)
+
 # Rule all - defines final outputs for all samples
 rule all:
     input:
-        # Visium HD outputs
-        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html", sample=sorted(VISIUMHD_SAMPLES)),
-        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix", sample=sorted(VISIUMHD_SAMPLES)),
+        f"{OUTPUT_DIR}/xenium/analysis_summary_table.csv",
+        f"{OUTPUT_DIR}/xenium/analysis_summary_table.html",
+        f"{OUTPUT_DIR}/xenium/metrics_summary.csv",
+        expand(f"{OUTPUT_DIR}/xenium/analysis_summaries/{{sample}}_analysis_summary.html",
+               sample=sorted(XENIUM_SAMPLES))
+
+
+# Target rule: the single-cell (Cell Ranger) outputs; idle unless FASTQs are
+# present under paths.fastqs
+rule cellranger_all:
+    input:
         expand(f"{OUTPUT_DIR}/cellranger/{{sample}}/outs/web_summary.html", sample=SAMPLES),
         expand(f"{OUTPUT_DIR}/cellranger/{{sample}}/outs/filtered_feature_bc_matrix", sample=SAMPLES),
         f"{OUTPUT_DIR}/multi_sample_summary.csv",
         f"{OUTPUT_DIR}/scanpy/combined_harmony_integrated.h5ad",
         f"{OUTPUT_DIR}/scanpy/inspect_integrated_anndata_combined.ipynb",
-        # per-sample filtering timeline plots
         expand(f"{OUTPUT_DIR}/qc/filtering_timeline/{{sample}}.png", sample=SAMPLES)
-        # scenic outputs
-        # expand(f"{OUTPUT_DIR}/scenic/{{sample}}.loom", sample=SAMPLES),
-        # # CellBender outputs
-        # expand(f"{OUTPUT_DIR}/cellbender/{{sample}}_filtered.h5", sample=SAMPLES),
-        # Scrublet outputs
-        # expand(f"{OUTPUT_DIR}/scrublet/{{sample}}_doublets.csv", sample=SAMPLES)
-        # # Velocyto outputs
-        # expand(f"{OUTPUT_DIR}/velocyto/{{sample}}.loom", sample=SAMPLES)
-        # # scVelo outputs
-        # expand(f"{OUTPUT_DIR}/scanpy/{{sample}}_scvelo.h5ad", sample=SAMPLES),
-        # # Pileup and phasing outputs
-        # expand(f"{OUTPUT_DIR}/numbat/{{sample}}_allele_counts.tsv.gz", sample=SAMPLES),
-        # # Numbat outputs
-        # expand(f"{OUTPUT_DIR}/numbat/{{sample}}/done.txt", sample=SAMPLES)
 
 
-# Target rule: Visium HD counting only, without the single-cell downstream steps
-rule spaceranger_all:
+# Rule: one table of the metrics shown in every analysis_summary.html
+rule xenium_summary_table:
     input:
-        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html", sample=sorted(VISIUMHD_SAMPLES)),
-        expand(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix", sample=sorted(VISIUMHD_SAMPLES))
+        summaries = [os.path.join(XENIUM_SAMPLES[s]["dir"], "analysis_summary.html")
+                     for s in sorted(XENIUM_SAMPLES)]
+    output:
+        csv = f"{OUTPUT_DIR}/xenium/analysis_summary_table.csv",
+        html = f"{OUTPUT_DIR}/xenium/analysis_summary_table.html"
+    params:
+        script = "src/aggregate_xenium_summaries.py"
+    shell:
+        """
+        python {params.script} --summaries {input.summaries:q} \
+            --csv {output.csv} --html {output.html}
+        """
+
+
+# Rule: stack every metrics_summary.csv (numeric, one row per sample)
+rule xenium_metrics_summary:
+    input:
+        metrics = [os.path.join(XENIUM_SAMPLES[s]["dir"], "metrics_summary.csv")
+                   for s in sorted(XENIUM_SAMPLES)]
+    output:
+        csv = f"{OUTPUT_DIR}/xenium/metrics_summary.csv"
+    run:
+        import pandas as pd
+
+        frames = []
+        for sample_id, path in zip(sorted(XENIUM_SAMPLES), input.metrics):
+            df = pd.read_csv(path)
+            df.insert(0, "sample_id", sample_id)
+            frames.append(df)
+        pd.concat(frames, ignore_index=True).to_csv(output.csv, index=False)
+
+
+# Rule: copy each analysis_summary.html next to the others, named by sample
+rule collect_xenium_summaries:
+    input:
+        xenium_file("analysis_summary.html")
+    output:
+        f"{OUTPUT_DIR}/xenium/analysis_summaries/{{sample}}_analysis_summary.html"
+    shell:
+        "cp {input:q} {output:q}"
+
+localrules: xenium_summary_table, xenium_metrics_summary, collect_xenium_summaries
+
+
+# Target rule: one processed AnnData per Xenium sample
+rule xenium_anndata_all:
+    input:
+        expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad", sample=sorted(XENIUM_SAMPLES)),
+        expand(f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}/markers.csv",
+               sample=sorted(XENIUM_SAMPLES))
+
+
+XENIUM_PLOTS = ["qc_violin.png", "qc_spatial.png", "pca_variance.png", "umap_qc.png",
+                "leiden.png", "spatial_leiden.png", "markers_dotplot.png", "markers.csv"]
+
+# Rule: standard per-sample plots (QC, UMAP, Leiden on tissue, marker dotplot);
+# see src/plot_xenium_anndata.py
+rule xenium_plots:
+    input:
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad"
+    output:
+        [f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}/{name}" for name in XENIUM_PLOTS]
+    log:
+        f"logs/xenium_plots/{{sample}}.log"
+    params:
+        script = "src/plot_xenium_anndata.py",
+        outdir = f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}",
+        python = XENIUM.get("python", "python")
+    threads: 2
+    resources:
+        mem_mb = 24000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} \
+            --h5ad {input.h5ad} --outdir {params.outdir} > {log} 2>&1
+        """
+
+
+# Rule: Xenium sample -> AnnData (QC filter, cell-area normalization,
+# PCA/UMAP/Leiden); see src/xenium_to_anndata.py
+rule xenium_anndata:
+    input:
+        matrix = xenium_file("cell_feature_matrix.h5"),
+        cells = xenium_file("cells.csv.gz")
+    output:
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad"
+    log:
+        f"logs/xenium_anndata/{{sample}}.log"
+    params:
+        script = "src/xenium_to_anndata.py",
+        xenium_dir = lambda wildcards: XENIUM_SAMPLES[wildcards.sample]["dir"],
+        python = XENIUM.get("python", "python"),
+        min_genes = XENIUM.get("min_genes", 10),
+        min_cells = XENIUM.get("min_cells", 5),
+        resolution = XENIUM.get("leiden_resolution", 0.5)
+    threads: 4
+    resources:
+        mem_mb = 32000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} \
+            --xenium-dir {params.xenium_dir:q} --sample-id {wildcards.sample} \
+            --out {output.h5ad} --min-genes {params.min_genes} \
+            --min-cells {params.min_cells} --resolution {params.resolution} \
+            > {log} 2>&1
+        """
 
 
 # Helper function to get FASTQ files for a sample
@@ -412,78 +343,6 @@ rule cellranger_count:
         module unload cellranger/8.0.1
         """
 
-
-# Rule: Space Ranger count for each Visium HD capture area
-def spaceranger_input(sample, key):
-    """Optional per-sample input file, or [] when not configured."""
-    value = VISIUMHD_SAMPLES[sample].get(key)
-    return value if value else []
-
-def spaceranger_extra_args(wildcards, input):
-    """Assemble the optional Space Ranger flags for a sample."""
-    meta = VISIUMHD_SAMPLES[wildcards.sample]
-    args = []
-    if input.image:
-        args.append(f'--image="{input.image}"')
-    if input.loupe_alignment:
-        args.append(f'--loupe-alignment="{input.loupe_alignment}"')
-    if meta.get("slide") and meta.get("area"):
-        # only set when the CytAssist image metadata is known to be wrong
-        args.append(f'--slide={meta["slide"]} --area={meta["area"]} --override-id')
-    bin_size = SPACERANGER.get("custom_bin_size")
-    if bin_size:
-        args.append(f"--custom-bin-size={bin_size}")
-    return " ".join(args)
-
-rule spaceranger_count:
-    input:
-        transcriptome = SPACERANGER.get("transcriptome", ""),
-        probe_set = SPACERANGER.get("probe_set", ""),
-        cytaimage = lambda wildcards: spaceranger_input(wildcards.sample, "cytaimage"),
-        image = lambda wildcards: spaceranger_input(wildcards.sample, "image"),
-        loupe_alignment = lambda wildcards: spaceranger_input(wildcards.sample, "loupe_alignment")
-    output:
-        web_summary = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/web_summary.html",
-        metrics_summary = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/metrics_summary.csv",
-        filtered_matrix_h5 = f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix.h5",
-        filtered_matrix_dir = directory(f"{OUTPUT_DIR}/spaceranger/{{sample}}/outs/binned_outputs/square_008um/filtered_feature_bc_matrix")
-    params:
-        manifest = SPACERANGER.get("pixi_manifest", "envs/spaceranger/pixi.toml"),
-        outdir = f"{OUTPUT_DIR}/spaceranger/{{sample}}",
-        fastq_dirs = lambda wildcards: ",".join(VISIUMHD_SAMPLES[wildcards.sample]["fastq_dirs"]),
-        fastq_prefix = lambda wildcards: VISIUMHD_SAMPLES[wildcards.sample]["fastq_prefix"],
-        create_bam = str(SPACERANGER.get("create_bam", False)).lower(),
-        localcores = SPACERANGER.get("localcores", 24),
-        localmem = SPACERANGER.get("localmem", 112),
-        extra = spaceranger_extra_args
-    threads: SPACERANGER.get("localcores", 24)
-    resources:
-        mem_mb = SPACERANGER.get("mem_mb", 120000),  # 117GB, fits any standard node
-        cpus = SPACERANGER.get("localcores", 24),
-        runtime = SPACERANGER.get("runtime", 2880),  # 48h
-        partition = SPACERANGER.get("partition", "standard"),
-        account = SPACERANGER.get("account", "sbsandme_lab")
-    log:
-        f"{OUTPUT_DIR}/logs/spaceranger_{{sample}}.log"
-    shell:
-        """
-        mkdir -p {OUTPUT_DIR}/logs
-        rm -rf {params.outdir}
-
-        pixi run --manifest-path {params.manifest} spaceranger count \
-            --id={wildcards.sample} \
-            --output-dir={params.outdir} \
-            --transcriptome={input.transcriptome} \
-            --probe-set={input.probe_set} \
-            --fastqs={params.fastq_dirs} \
-            --sample={params.fastq_prefix} \
-            --cytaimage="{input.cytaimage}" \
-            --create-bam={params.create_bam} \
-            --localcores={params.localcores} \
-            --localmem={params.localmem} \
-            --disable-ui \
-            {params.extra} > {log} 2>&1
-        """
 
 
 # Rule: Generate multi-sample summary
