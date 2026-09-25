@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--min-genes", type=int, default=10)
     parser.add_argument("--min-cells", type=int, default=5)
     parser.add_argument("--n-pcs", type=int, default=30)
-    parser.add_argument("--resolution", type=float, default=0.5)
+    parser.add_argument("--resolution", type=float, default=0.3)
     args = parser.parse_args()
 
     adata = load_xenium(args.xenium_dir, args.sample_id)

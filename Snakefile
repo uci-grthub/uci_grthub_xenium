@@ -228,7 +228,7 @@ rule xenium_anndata:
         python = XENIUM.get("python", "python"),
         min_genes = XENIUM.get("min_genes", 10),
         min_cells = XENIUM.get("min_cells", 5),
-        resolution = XENIUM.get("leiden_resolution", 0.5)
+        resolution = XENIUM.get("leiden_resolution", 0.3)
     threads: 4
     resources:
         mem_mb = 32000

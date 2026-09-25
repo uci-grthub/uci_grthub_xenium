@@ -38,7 +38,7 @@ xenium:
   python: "/dfs9/ucightf-lab/kstachel/.conda/envs/squidpy_dfs/bin/python"
   min_genes: 10
   min_cells: 5
-  leiden_resolution: 0.5
+  leiden_resolution: 0.3
 
 # scVI integration parameters
 min_genes: 200

@@ -96,7 +96,7 @@ runs every sample inside one 16-core allocation) writes
    least 5 cells (`xenium.min_cells`).
 3. Normalize by cell size: counts / `cell_area` x median `cell_area`, then
    `log1p`.
-4. PCA (30 PCs), neighbors, UMAP, Leiden (`xenium.leiden_resolution`, 0.5).
+4. PCA (30 PCs), neighbors, UMAP, Leiden (`xenium.leiden_resolution`, 0.3).
 
 Raw counts are in `layers["counts"]`, centroids in `obsm["spatial"]`, the
 per-cell scale in `obs["size_factor"]`, and Xenium's own total (genes plus
