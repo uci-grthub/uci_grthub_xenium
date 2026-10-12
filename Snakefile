@@ -10,6 +10,7 @@ onerror:
    shell("mail -s 'ERROR' {EMAIL} < {log}")
 
 import glob
+import json
 import os
 import re
 
@@ -67,6 +68,14 @@ OUTPUT_DIR = config["paths"]["output"]
 
 # Xenium configuration
 XENIUM = config.get("xenium", {})
+# merged objects: group name -> glob over sample ids
+XENIUM_MERGE_GROUPS = XENIUM.get("merge_groups") or {"merged": "*"}
+
+# sample ids and merge groups are single path components, so
+# anndata/{sample}.h5ad never matches anndata/merged/{group}.h5ad
+wildcard_constraints:
+    sample = "[^/]+",
+    group = "[^/]+"
 
 def get_xenium_samples():
     """
@@ -128,7 +137,8 @@ rule cellranger_all:
         f"{OUTPUT_DIR}/multi_sample_summary.csv",
         f"{OUTPUT_DIR}/scanpy/combined_harmony_integrated.h5ad",
         f"{OUTPUT_DIR}/scanpy/inspect_integrated_anndata_combined.ipynb",
-        expand(f"{OUTPUT_DIR}/qc/filtering_timeline/{{sample}}.png", sample=SAMPLES)
+        expand(f"{OUTPUT_DIR}/qc/filtering_timeline/{{sample}}.png", sample=SAMPLES),
+        expand(f"{OUTPUT_DIR}/qc/violin/{{sample}}.png", sample=SAMPLES)
 
 
 # Rule: one table of the metrics shown in every analysis_summary.html
@@ -184,20 +194,36 @@ rule xenium_anndata_all:
         expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad", sample=sorted(XENIUM_SAMPLES)),
         expand(f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}/markers.csv",
                sample=sorted(XENIUM_SAMPLES)),
-        f"{OUTPUT_DIR}/xenium/anndata/merged/merged.h5ad"
+        expand(f"{OUTPUT_DIR}/xenium/anndata/merged/{{group}}.h5ad",
+               group=sorted(XENIUM_MERGE_GROUPS)),
+        expand(f"{OUTPUT_DIR}/xenium/anndata/merged/plots/{{group}}/markers.csv",
+               group=sorted(XENIUM_MERGE_GROUPS)),
+        f"{OUTPUT_DIR}/xenium/anndata/plots/qc_violin_by_slide.png"
 
 
-# Rule: all samples in one AnnData, re-normalized from raw counts with the
-# same fixed xenium.target_area;
+def merge_group_samples(group):
+    """Samples whose id matches the xenium.merge_groups pattern for group."""
+    import fnmatch
+
+    samples = [s for s in sorted(XENIUM_SAMPLES)
+               if fnmatch.fnmatch(s, XENIUM_MERGE_GROUPS[group])]
+    if not samples:
+        raise ValueError(f"merge group '{group}' matches no sample: "
+                         f"{XENIUM_MERGE_GROUPS[group]}")
+    return samples
+
+
+# Rule: the samples of one merge group in one AnnData, re-normalized from raw
+# counts with the same fixed xenium.target_area, no batch correction;
 # see src/merge_xenium_anndata.py
 rule xenium_merge:
     input:
-        h5ads = expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
-                       sample=sorted(XENIUM_SAMPLES))
+        h5ads = lambda wildcards: expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
+                                         sample=merge_group_samples(wildcards.group))
     output:
-        h5ad = f"{OUTPUT_DIR}/xenium/anndata/merged/merged.h5ad"
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/merged/{{group}}.h5ad"
     log:
-        "logs/xenium_merge.log"
+        "logs/xenium_merge/{group}.log"
     params:
         script = "src/merge_xenium_anndata.py",
         python = XENIUM.get("python", "python"),
@@ -210,20 +236,50 @@ rule xenium_merge:
     shell:
         """
         PYTHONNOUSERSITE=1 {params.python} {params.script} \
-            --h5ads {input.h5ads} --out {output.h5ad} --target-area {params.target_area} \
+            --h5ads {input.h5ads} --out {output.h5ad} \
             --min-cells {params.min_cells} --resolution {params.resolution} \
             --target-area {params.target_area} > {log} 2>&1
         """
 
 
-XENIUM_PLOTS = ["qc_violin.png", "qc_spatial.png", "pca_variance.png", "umap_qc.png",
+XENIUM_MERGED_PLOTS = ["umap.png", "umap_by_sample.png", "umap_qc.png",
+                       "cluster_composition.png", "markers_dotplot.png", "markers.csv"]
+
+# Rule: plots for a merged object (UMAP by sample and cluster, per-sample
+# UMAP panels to judge batch effects, cluster composition, marker dotplot)
+rule xenium_merge_plots:
+    input:
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/merged/{{group}}.h5ad"
+    output:
+        [f"{OUTPUT_DIR}/xenium/anndata/merged/plots/{{group}}/{name}"
+         for name in XENIUM_MERGED_PLOTS]
+    log:
+        "logs/xenium_merge_plots/{group}.log"
+    params:
+        script = "src/plot_xenium_anndata.py",
+        outdir = f"{OUTPUT_DIR}/xenium/anndata/merged/plots/{{group}}",
+        python = XENIUM.get("python", "python")
+    threads: 2
+    resources:
+        mem_mb = 48000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} --merged \
+            --h5ad {input.h5ad} --outdir {params.outdir} > {log} 2>&1
+        """
+
+
+XENIUM_PLOTS = ["qc_violin.png", "qc_spatial.png", "filtering_spatial.png",
+                "pca_variance.png", "umap_qc.png",
                 "leiden.png", "spatial_leiden.png", "markers_dotplot.png", "markers.csv"]
 
 # Rule: standard per-sample plots (QC, UMAP, Leiden on tissue, marker dotplot);
-# see src/plot_xenium_anndata.py
+# see src/plot_xenium_anndata.py. cells.csv.gz feeds filtering_spatial.png
+# (cells removed by QC filtering highlighted on the tissue).
 rule xenium_plots:
     input:
-        h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad"
+        h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
+        cells = xenium_file("cells.csv.gz")
     output:
         [f"{OUTPUT_DIR}/xenium/anndata/plots/{{sample}}/{name}" for name in XENIUM_PLOTS]
     log:
@@ -238,7 +294,35 @@ rule xenium_plots:
     shell:
         """
         PYTHONNOUSERSITE=1 {params.python} {params.script} \
-            --h5ad {input.h5ad} --outdir {params.outdir} > {log} 2>&1
+            --h5ad {input.h5ad} --outdir {params.outdir} \
+            --cells-csv {input.cells:q} > {log} 2>&1
+        """
+
+
+# Rule: per-slide QC violin plots pooling every sample of a slide into one
+# violin (genes, transcripts, cell area per cell); see
+# src/plot_xenium_qc_by_slide.py
+rule xenium_qc_by_slide:
+    input:
+        h5ads = expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
+                       sample=sorted(XENIUM_SAMPLES))
+    output:
+        png = f"{OUTPUT_DIR}/xenium/anndata/plots/qc_violin_by_slide.png"
+    log:
+        "logs/xenium_qc_by_slide.log"
+    params:
+        script = "src/plot_xenium_qc_by_slide.py",
+        python = XENIUM.get("python", "python"),
+        slide_map = json.dumps({s: XENIUM_SAMPLES[s]["slide"]
+                                for s in sorted(XENIUM_SAMPLES)})
+    threads: 2
+    resources:
+        mem_mb = 24000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} \
+            --h5ads {input.h5ads} --slide-map {params.slide_map:q} \
+            --out {output.png} > {log} 2>&1
         """
 
 
@@ -269,7 +353,7 @@ rule xenium_anndata:
             --xenium-dir {params.xenium_dir:q} --sample-id {wildcards.sample} \
             --out {output.h5ad} --min-genes {params.min_genes} \
             --min-cells {params.min_cells} --resolution {params.resolution} \
-            > {log} 2>&1
+            --target-area {params.target_area} > {log} 2>&1
         """
 
 
@@ -621,6 +705,32 @@ rule plot_filtering_timeline:
             --min-cells {params.min_cells} \
             --out {output.png}
         """
+
+# Rule: per-sample QC violin plots (genes, transcripts, % mitochondrial
+# counts per cell); see src/plot_cellranger_qc.py
+rule plot_cellranger_qc:
+    input:
+        matrix = f"{OUTPUT_DIR}/cellranger/{{sample}}/outs/filtered_feature_bc_matrix.h5"
+    output:
+        png = f"{OUTPUT_DIR}/qc/violin/{{sample}}.png"
+    params:
+        script = "src/plot_cellranger_qc.py",
+        sample_id = "{sample}"
+    threads: 2
+    resources:
+        mem_mb = 8000,
+        cpus = 2,
+        partition = "standard",
+        account = "sbsandme_lab"
+    shell:
+        """
+        mkdir -p {OUTPUT_DIR}/qc/violin
+        python {params.script} \
+            --matrix {input.matrix} \
+            --sample-id {params.sample_id} \
+            --out {output.png}
+        """
+
 
 # Rule: Velocyto
 rule velocyto:

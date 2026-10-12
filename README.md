@@ -107,7 +107,7 @@ re-filter from `layers["counts"]`.
 
 ### Merged AnnData
 
-The same target also writes `output/xenium/anndata/merged/merged.h5ad` with
+The same target also writes merged objects under `output/xenium/anndata/merged/` with
 `src/merge_xenium_anndata.py`. Every sample is rebuilt from
 `layers["counts"]` (per-sample normalization is discarded), genes are
 outer-joined, and all cells are normalized with the same fixed
@@ -118,6 +118,21 @@ with that constant, never a per-sample median.
 PCA/UMAP/Leiden run on the merged object with no batch correction
 (`obs["sample_id"]` is the batch); per-sample clusters are kept as
 `obs["leiden_sample"]`.
+
+Which samples are merged is set by `xenium.merge_groups` (group name -> glob
+over sample ids); each group writes `merged/<group>.h5ad` and plots in
+`merged/plots/<group>/` (UMAP by sample and cluster, one UMAP panel per
+sample to judge batch effects, cluster composition per sample, marker
+dotplot):
+
+```yaml
+merge_groups:
+  merged: "*"                      # all 15 samples
+  slide_0120636: "0120636_*"       # the 8 regions on slide 0120636
+```
+
+Build one group with
+`snakemake output/xenium/anndata/merged/plots/slide_0120636/markers.csv`.
 
 Other downstream analysis of the region outputs is done in notebooks: see `src/read_in_xenium.ipynb`, `src/samui_xenium_process.py` and
 `src/subset_xenium_by_coordinates_and_combine.py`.

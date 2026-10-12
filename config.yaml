@@ -42,6 +42,12 @@ xenium:
   # normalization: counts / cell_area * target_area (µm²), then log1p; one
   # constant for every sample and the merged object (like Seurat scale.factor)
   target_area: 100
+  # merged objects (output/xenium/anndata/merged/<group>.h5ad): group name ->
+  # glob over sample ids (<slide>_<region>); no batch correction
+  merge_groups:
+    merged: "*"
+    slide_0120633: "0120633_*"
+    slide_0120636: "0120636_*"
 
 # scVI integration parameters
 min_genes: 200
