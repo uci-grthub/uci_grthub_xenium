@@ -13,6 +13,9 @@
 # Build merged AnnData + merged plots for one or more merge groups
 # (config.yaml xenium.merge_groups). Usage:
 #   sbatch src/submit_merge_plots.sh <group> [group ...]
+# Extra snakemake options go in SNAKEMAKE_ARGS, e.g. to rebuild existing merged
+# objects after a config change:
+#   SNAKEMAKE_ARGS="--forcerun xenium_merge" sbatch src/submit_merge_plots.sh <group>
 # Submit from the repository root.
 cd "${SLURM_SUBMIT_DIR:-.}"
 
@@ -27,4 +30,5 @@ for g in "$@"; do
 done
 
 echo "Targets:$TARGETS"
-snakemake --cores 8 --resources mem_mb=100000 --rerun-triggers mtime --rerun-incomplete -- $TARGETS
+snakemake --cores 8 --resources mem_mb=100000 --rerun-triggers mtime --rerun-incomplete \
+    ${SNAKEMAKE_ARGS:-} -- $TARGETS

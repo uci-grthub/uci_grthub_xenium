@@ -24,6 +24,7 @@ Usage:
 import argparse
 import os
 
+import numpy as np
 import pandas as pd
 import scanpy as sc
 
@@ -62,11 +63,34 @@ def cell_size_normalize(adata, target_area):
     sc.pp.log1p(adata)
 
 
-def embed_and_cluster(adata, n_pcs, resolution):
-    """PCA, neighbors, UMAP, Leiden; returns the number of PCs used."""
+def harmony_correct(adata, batch_key):
+    """Harmony on X_pca over obs[batch_key] -> obsm["X_pca_harmony"].
+
+    Calls harmonypy directly: scanpy's harmony_integrate transposes Z_corr,
+    which harmonypy >= 2 already returns as cells x PCs.
+    """
+    import harmonypy
+
+    z = np.asarray(harmonypy.run_harmony(adata.obsm["X_pca"], adata.obs,
+                                         [batch_key], verbose=False).Z_corr)
+    if z.shape[0] != adata.n_obs:
+        z = z.T
+    adata.obsm["X_pca_harmony"] = z
+
+
+def embed_and_cluster(adata, n_pcs, resolution, batch_key=None):
+    """PCA, neighbors, UMAP, Leiden; returns the number of PCs used.
+
+    With batch_key, neighbors (and so UMAP and Leiden) use the Harmony-corrected
+    PCs; X_pca stays uncorrected.
+    """
     n_pcs = min(n_pcs, adata.n_obs - 1, adata.n_vars - 1)
     sc.pp.pca(adata, n_comps=n_pcs)
-    sc.pp.neighbors(adata)
+    if batch_key:
+        harmony_correct(adata, batch_key)
+        sc.pp.neighbors(adata, use_rep="X_pca_harmony")
+    else:
+        sc.pp.neighbors(adata)
     sc.tl.umap(adata)
     sc.tl.leiden(adata, resolution=resolution, key_added="leiden",
                  flavor="igraph", n_iterations=2, directed=False)

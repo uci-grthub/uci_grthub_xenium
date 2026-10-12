@@ -123,9 +123,13 @@ outer-joined, and all cells are normalized with the same fixed
 code should call `cell_size_normalize()` from `src/xenium_to_anndata.py`
 with that constant, never a per-sample median.
 
-PCA/UMAP/Leiden run on the merged object with no batch correction
-(`obs["sample_id"]` is the batch); per-sample clusters are kept as
-`obs["leiden_sample"]`.
+PCA/UMAP/Leiden run on the merged object; `obs["sample_id"]` is the batch and
+per-sample clusters are kept as `obs["leiden_sample"]`. Batch correction is
+set by `xenium.batch_correction`: `none` (default) or `harmony`, which runs
+Harmony on the PCs over `sample_id` (`obsm["X_pca_harmony"]`) and builds
+neighbors/UMAP/Leiden from those; `X` and `X_pca` stay uncorrected. The choice
+is recorded in `uns["preprocessing"]["batch_correction"]` and in the
+`umap.png` title. Changing it applies to every merge group.
 
 Which samples are merged is set by `xenium.merge_groups` (group name -> glob
 over sample ids); each group writes `merged/<group>.h5ad` and plots in

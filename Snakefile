@@ -226,7 +226,8 @@ def merge_group_samples(group):
 
 
 # Rule: the samples of one merge group in one AnnData, re-normalized from raw
-# counts with the same fixed xenium.target_area, no batch correction;
+# counts with the same fixed xenium.target_area; xenium.batch_correction
+# (none | harmony) sets whether the embedding is corrected over sample_id;
 # see src/merge_xenium_anndata.py
 rule xenium_merge:
     input:
@@ -241,7 +242,8 @@ rule xenium_merge:
         python = XENIUM.get("python", "python"),
         target_area = XENIUM.get("target_area", 100),
         min_cells = XENIUM.get("min_cells", 5),
-        resolution = XENIUM.get("leiden_resolution", 0.3)
+        resolution = XENIUM.get("leiden_resolution", 0.3),
+        batch_correction = XENIUM.get("batch_correction", "none")
     threads: 8
     resources:
         mem_mb = 96000
@@ -250,7 +252,8 @@ rule xenium_merge:
         PYTHONNOUSERSITE=1 {params.python} {params.script} \
             --h5ads {input.h5ads} --out {output.h5ad} \
             --min-cells {params.min_cells} --resolution {params.resolution} \
-            --target-area {params.target_area} > {log} 2>&1
+            --target-area {params.target_area} \
+            --batch-correction {params.batch_correction} > {log} 2>&1
         """
 
 

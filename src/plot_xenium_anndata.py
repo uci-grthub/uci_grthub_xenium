@@ -149,8 +149,9 @@ def plot_merged(adata, name, outdir):
     sc.pl.umap(adata, color="leiden", ax=axes[1], show=False,
                legend_loc="on data", legend_fontsize=8, legend_fontoutline=2,
                title=f"Leiden ({n_clusters} clusters)")
-    fig.suptitle(f"{name}: {len(samples)} samples, {adata.n_obs:,} cells, "
-                 "no batch correction")
+    correction = adata.uns.get("preprocessing", {}).get("batch_correction", "none")
+    correction = "no batch correction" if correction == "none" else f"{correction} on sample_id"
+    fig.suptitle(f"{name}: {len(samples)} samples, {adata.n_obs:,} cells, {correction}")
     fig.tight_layout()
     save(fig, outdir, "umap.png")
 

@@ -55,8 +55,11 @@ xenium:
   # normalization: counts / cell_area * target_area (µm²), then log1p; one
   # constant for every sample and the merged object (like Seurat scale.factor)
   target_area: 100
+  # batch correction for merged objects: none | harmony (Harmony on the PCs
+  # over sample_id; neighbors/UMAP/Leiden use the corrected PCs, X stays as is)
+  batch_correction: "none"
   # merged objects (output/xenium/anndata/merged/<group>.h5ad): group name ->
-  # glob over sample ids (<slide>_<region>); no batch correction
+  # glob over sample ids (<slide>_<region>)
   merge_groups:
     merged: "*"
     # slide_0012345: "0012345_*"

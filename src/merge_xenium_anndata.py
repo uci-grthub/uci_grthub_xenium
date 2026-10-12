@@ -10,7 +10,10 @@ cell size with the same fixed constant as the per-sample objects:
 
 Genes are outer-joined (a gene filtered out of one sample is 0 there), then
 kept if detected in >= --min-cells merged cells. PCA/UMAP/Leiden are run on
-the merged object without batch correction; obs["sample_id"] holds the batch.
+the merged object; obs["sample_id"] holds the batch. With
+--batch-correction harmony, Harmony corrects the PCs over sample_id
+(obsm["X_pca_harmony"]) and neighbors/UMAP/Leiden use those; X and X_pca stay
+uncorrected. The default is none.
 Per-sample Leiden labels are kept as obs["leiden_sample"].
 
 Usage:
@@ -51,6 +54,8 @@ def main():
     parser.add_argument("--min-cells", type=int, default=5)
     parser.add_argument("--n-pcs", type=int, default=30)
     parser.add_argument("--resolution", type=float, default=0.3)
+    parser.add_argument("--batch-correction", choices=["none", "harmony"],
+                        default="none", help="correct PCs over sample_id")
     args = parser.parse_args()
 
     samples = [counts_only(p) for p in sorted(args.h5ads)]
@@ -62,7 +67,8 @@ def main():
     adata.layers["counts"] = adata.X.copy()
 
     cell_size_normalize(adata, args.target_area)
-    n_pcs = embed_and_cluster(adata, args.n_pcs, args.resolution)
+    batch_key = "sample_id" if args.batch_correction == "harmony" else None
+    n_pcs = embed_and_cluster(adata, args.n_pcs, args.resolution, batch_key)
 
     per_sample = adata.obs.groupby("sample_id", observed=True)["cell_area"].median()
     adata.uns["preprocessing"] = {
@@ -73,14 +79,15 @@ def main():
         "min_cells": args.min_cells,
         "n_pcs": n_pcs,
         "leiden_resolution": args.resolution,
-        "batch_correction": "none",
+        "batch_correction": args.batch_correction,
     }
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     adata.write_h5ad(args.out, compression="gzip")
     print(f"merged {adata.obs['sample_id'].nunique()} samples: {adata.n_obs} cells, "
           f"{adata.n_vars} genes, target_area={args.target_area:g} µm², "
-          f"{adata.obs['leiden'].nunique()} clusters -> {args.out}")
+          f"{adata.obs['leiden'].nunique()} clusters, "
+          f"batch_correction={args.batch_correction} -> {args.out}")
     print(per_sample.round(1).to_string())
 
 
