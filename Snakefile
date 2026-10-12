@@ -1,21 +1,33 @@
 # Snakemake workflow for Xenium runs (plus idle single-cell Cell Ranger rules)
 # Xenium outputs are discovered under xenium.data_root; see README.md
 
-EMAIL = "kstachel@uci.edu"
-onstart:
-   shell("mail -s 'STARTED' {EMAIL} < {log}")
-onsuccess:
-   shell("mail -s 'DONE' {EMAIL} < {log}")
-onerror:
-   shell("mail -s 'ERROR' {EMAIL} < {log}")
-
 import glob
 import json
 import os
 import re
 
-# Load configuration
+from snakemake.exceptions import WorkflowError
+
+# Load configuration; config.yaml is per-project and gitignored
+if not os.path.exists("config.yaml"):
+    raise WorkflowError("config.yaml not found: cp config.example.yaml config.yaml and fill it in")
 configfile: "config.yaml"
+
+# start/done/error mail goes to config email; empty disables it
+EMAIL = config.get("email") or ""
+onstart:
+    if EMAIL:
+        shell("mail -s 'STARTED' {EMAIL} < {log}")
+onsuccess:
+    if EMAIL:
+        shell("mail -s 'DONE' {EMAIL} < {log}")
+onerror:
+    if EMAIL:
+        shell("mail -s 'ERROR' {EMAIL} < {log}")
+
+SLURM_ACCOUNT = config.get("slurm_account") or ""
+SLURM_GPU_ACCOUNT = config.get("slurm_gpu_account") or ""
+MULTIQC_SIF = config.get("multiqc_sif", "multiqc-1.20.sif")
 
 # Auto-detect samples from FASTQ directory
 def get_samples_from_fastq_dir():
@@ -384,7 +396,7 @@ rule fastqc:
         mem_mb = 4000,
         cpus = 2,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         module load fastqc/0.11.9
@@ -405,11 +417,11 @@ rule multiqc:
         mem_mb = 4000,
         cpus = 2,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         module load singularity/3.11.3
-        singularity run /dfs9/ucightf-lab/kstachel/TOOLS/multiqc-1.20.sif multiqc {OUTPUT_DIR}/fastqc -o {OUTPUT_DIR}
+        singularity run {MULTIQC_SIF} multiqc {OUTPUT_DIR}/fastqc -o {OUTPUT_DIR}
         module unload singularity/3.11.3
         """
 
@@ -436,7 +448,7 @@ rule cellranger_count:
         mem_mb_per_cpu=6000,
         cpus = 8,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         module load cellranger/8.0.1
@@ -478,7 +490,7 @@ rule multi_sample_summary:
         mem_mb_per_cpu=6000,
         cpus = 8,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     run:
         import pandas as pd
         import os
@@ -599,7 +611,7 @@ rule tenx_scvi_integration:
         mem_mb = 48000,  # 32GB in MB
         cpus = 8,
         partition = "gpu",
-        account = "sbsandme_lab_gpu"
+        account = SLURM_GPU_ACCOUNT
     shell:
         """
         mkdir -p {OUTPUT_DIR}/scanpy
@@ -633,7 +645,7 @@ rule tenx_harmony_integration:
     resources:
         mem_mb = 48000,  # 32GB in MB
         cpus = 8,
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         mkdir -p {OUTPUT_DIR}/scanpy
@@ -666,7 +678,7 @@ rule tenx_harmony_notebook:
     resources:
         mem_mb = 32000,  # 32GB in MB
         cpus = 8,
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         mkdir -p {OUTPUT_DIR}/scanpy
@@ -693,7 +705,7 @@ rule plot_filtering_timeline:
         mem_mb = 24000,  # 24GB in MB
         cpus = 4,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         mkdir -p {OUTPUT_DIR}/qc
@@ -721,7 +733,7 @@ rule plot_cellranger_qc:
         mem_mb = 8000,
         cpus = 2,
         partition = "standard",
-        account = "sbsandme_lab"
+        account = SLURM_ACCOUNT
     shell:
         """
         mkdir -p {OUTPUT_DIR}/qc/violin

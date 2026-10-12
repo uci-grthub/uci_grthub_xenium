@@ -24,3 +24,9 @@ weblinks.txt
 .codetree/
 geo_staging/
 .pixi/
+
+# project-specific notes, results and run details (see docs/local/README.md)
+docs/local/
+
+# per-project config; config.example.yaml is the tracked template
+config.yaml

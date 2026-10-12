@@ -12,8 +12,9 @@
 
 # Build merged AnnData + merged plots for one or more merge groups
 # (config.yaml xenium.merge_groups). Usage:
-#   sbatch src/submit_merge_plots.sh slide_0120633 [group ...]
-cd /dfs9/ucightf-lab/projects/GaneA/260925_GaneA_xenium
+#   sbatch src/submit_merge_plots.sh <group> [group ...]
+# Submit from the repository root.
+cd "${SLURM_SUBMIT_DIR:-.}"
 
 if [ $# -eq 0 ]; then
     echo "usage: sbatch $0 <group> [group ...]" >&2

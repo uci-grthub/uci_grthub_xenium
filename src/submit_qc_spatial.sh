@@ -13,7 +13,7 @@
 # Regenerate the per-sample plot sets: filtering_spatial.png is new (missing
 # everywhere, so it triggers every sample's xenium_plots rerun), which also
 # rewrites qc_spatial.png in the reverted single-row style.
-cd /dfs9/ucightf-lab/projects/GaneA/260925_GaneA_xenium
+cd "${SLURM_SUBMIT_DIR:-.}"
 
 TARGETS=""
 for f in output/xenium/anndata/*.h5ad; do

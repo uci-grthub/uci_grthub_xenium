@@ -1,3 +1,5 @@
+# Copy to config.yaml (gitignored) and fill in for your project:
+#   cp config.example.yaml config.yaml
 # Configuration for the Xenium workflow (and idle Cell Ranger rules)
 
 # ENSEMBL_RELEASE=84
@@ -9,6 +11,17 @@
 samples:
 
 metadata: "data/metadata.csv"
+
+# Who gets the workflow's start/done/error mail; leave empty to disable
+email: ""
+
+# SLURM accounts for rules that set resources.account (Cell Ranger and
+# single-cell rules); list yours with: sacctmgr -nP show assoc user=$USER format=Account
+slurm_account: ""
+slurm_gpu_account: ""
+
+# multiqc container for rule multiqc
+multiqc_sif: "/path/to/multiqc-1.20.sif"
 
 # Input/Output paths
 paths: 
@@ -22,7 +35,7 @@ references:
   transcriptome: "/dfs8/commondata/cellranger/refdata-cellranger-GRCh38-3.0.0"
   # Mouse reference (alternative)
   # transcriptome: "/dfs8/commondata/cellranger/refdata-cellranger-mm10-1.2.0"
-  repeat_mask: "/dfs9/ucightf-lab/kstachel/kstachel_references/repeatmasker/Homo_sapiens_rm_refseq.out.gz"
+  repeat_mask: "/path/to/repeatmasker/Homo_sapiens_rm_refseq.out.gz"
 
 # CellRanger parameters
 params:
@@ -35,7 +48,7 @@ params:
 xenium:
   data_root: "data"
   # per-sample AnnData (rule xenium_anndata); python needs scanpy + leidenalg
-  python: "/dfs9/ucightf-lab/kstachel/.conda/envs/squidpy_dfs/bin/python"
+  python: "/path/to/envs/squidpy/bin/python"
   min_genes: 10
   min_cells: 5
   leiden_resolution: 0.3
@@ -46,8 +59,7 @@ xenium:
   # glob over sample ids (<slide>_<region>); no batch correction
   merge_groups:
     merged: "*"
-    slide_0120633: "0120633_*"
-    slide_0120636: "0120636_*"
+    # slide_0012345: "0012345_*"
 
 # scVI integration parameters
 min_genes: 200
@@ -57,9 +69,9 @@ n_top_genes: 2000
 batch_key: "batch"
 
 ## Scenic
-TFs: "/dfs9/ucightf-lab/kstachel/kstachel_references/scenic/hs_hgnc_curated_tfs.txt"
-motifs: "/dfs9/ucightf-lab/kstachel/kstachel_references/scenic/motifs-v9-nr.hgnc.tbl"
-feather_db: "/dfs9/ucightf-lab/kstachel/kstachel_references/scenic/hg38_refseq-10kb_up_and_down_tss.mc9nr.feather"
+TFs: "/path/to/scenic/hs_hgnc_curated_tfs.txt"
+motifs: "/path/to/scenic/motifs-v9-nr.hgnc.tbl"
+feather_db: "/path/to/scenic/hg38_refseq-10kb_up_and_down_tss.mc9nr.feather"
 
 # Available references (for documentation)
 # Main directory: /dfs8/commondata/cellranger/

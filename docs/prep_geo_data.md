@@ -1,36 +1,49 @@
-use NCBI GEO as the primary repository for the Xenium dataset. 
+# Preparing Xenium data for NCBI GEO
 
-place the complete original Xenium output folders, along with any processed analysis files, in a convenient shared location from which I can download them for submission
+Xenium is imaging-based: the raw data GEO asks for are the morphology images and
+decoded transcripts, not FASTQ files. Stage the original Xenium output folders
+(plus any processed analysis files) in one shared location for submission, and
+include a checksum manifest so integrity can be verified after transfer.
 
-Include:
-  1. morphology image files (geo_staging/Aged_cohort/morphology_focus, geo_staging/Adult_cohort/morphology_focus)
-  2. decoded transcript-coordinate files (what does decoded mean here?)
-  3. cell-feature matrices (for only 'all' for the 2 cohorts? not integrated data)
-  4. cell and nucleus segmentation/boundary files (geo_staging/Aged_cohort/nucleus_boundaries.csv.gz, geo_staging, Aged_cohort/cell_boundaries.csv.gz, geo_staging/Aged_cohort/cell_feature_matrix.h5)
-  5. panel and run information (geo_staging/metadata/Adult_cohort_experiment.xenium, geo_staging/metadata/Aged_cohort_experiment.xenium)
-  6. sample-to-ROI/group/brain-region mapping. (geo_staging/Aged_cohort/coordinates.csv, geo_staging/Adult_cohort/coordinates.csv)
+## What GEO requires (10x Genomics Xenium In Situ)
 
-Since Xenium is imaging-based, I understand that the relevant raw files are the morphology images and transcript-coordinate outputs rather than FASTQ sequencing files. 
+Raw data files, per region (`output-XETG*` directory):
 
-A checksum manifest would also be helpful, if available, to verify file integrity after transfer.
+- High-resolution morphology images (`morphology.ome.tif`, `morphology_focus/`)
+- Decoded transcripts (`transcripts.parquet` or `transcripts.csv.gz`) — the
+  per-transcript gene calls with x/y/z coordinates and quality scores
 
-from ncbi guidelines: 
-10x Genomics Xenium in Situ
+Processed data files:
 
-For Xenium studies, GEO requires raw data, processed data, and metadata.
+- Transcript counts, MEX (`cell_feature_matrix/`) or HDF5 (`cell_feature_matrix.h5`)
+- Cell summary (`cells.parquet` or `cells.csv.gz`)
+- Cell segmentation (`cell_boundaries.parquet` or `.csv.gz`)
+- Nucleus segmentation (`nucleus_boundaries.parquet` or `.csv.gz`)
+- Optional supplementary objects (e.g. `.h5ad` or Seurat `.rds`)
 
-    Raw data files
-        High-resolution morphology images
-        Decoded transcripts (parquet or csv format)
-    Processed data files
-        Transcript count (MEX or HDF5 format)
-        Cell summary (parquet or csv format)
-        Cell segmentation (parquet or csv format)
-        Nucleus segmentation (parquet or csv format)
-    Metadata
-        Use the Xenium-specific template for providing study and sample metadata:
+Metadata:
 
+- `docs/Xenium_template.xlsx` — GEO's Xenium metadata template (study,
+  samples, protocols). The `METADATA EXAMPLE` sheet shows a filled-in record.
+- Panel and run information: each region's `experiment.xenium` and
+  `gene_panel.json`.
+- A sample-to-group mapping (sample id, slide, region, condition), and for
+  regions cut from a larger section, the ROI coordinates.
 
+Upload individual files over FTP; do not bundle them into `.zip`/`.tar`
+archives.
 
-this is an example GSE243168
+## Staging checklist
 
+1. Copy each region's raw and processed files under `geo_staging/<sample>/`
+   (`geo_staging/` is gitignored).
+2. Put shared metadata (`experiment.xenium` per region, sample mapping table)
+   under `geo_staging/metadata/`.
+3. Write a checksum manifest:
+   `(cd geo_staging && find . -type f ! -name md5sums.txt -exec md5sum {} + > md5sums.txt)`.
+4. Fill in `docs/Xenium_template.xlsx`, one row per sample, listing each data
+   file in the data file columns.
+
+Example Xenium GEO records: GSE243168, GSE294965, GSE276273.
+
+Project-specific requests and notes go in `docs/local/` (gitignored).

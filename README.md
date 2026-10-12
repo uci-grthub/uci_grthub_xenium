@@ -1,18 +1,20 @@
-# GaneA Xenium (order 0926X-02)
+# Xenium workflow
 
-Snakemake workflow for this project's Xenium data on HPC3 (SLURM). The Xenium
+Snakemake workflow for 10x Xenium data on HPC3 (SLURM). The Xenium
 instrument runs its onboard analysis, so the delivery already holds cells,
 transcripts and the cell-feature matrix per region; this workflow discovers
 those region outputs and gathers their QC into one table. The repository also
-carries the lab's Cell Ranger and downstream single-cell rules, which this
-project does not use.
+carries the lab's Cell Ranger and downstream single-cell rules, which Xenium
+projects do not use.
 
-Run: `20260916_0926X-02_GaneA`, two slides (`0120633`, `0120636`), 15 regions,
-Xenium Mouse 5K Pan Tissue & Pathways panel, FFPE.
+Project-specific notes (run ids, slides, panel, results) live in `docs/local/`,
+which is gitignored.
 
 ## Layout
 - `Snakefile` — the workflow. All rules live here except the includes below.
-- `config.yaml` — paths and per-rule parameters.
+- `config.example.yaml` — template for `config.yaml` (paths, per-rule
+  parameters, merge groups, mail address, SLURM accounts). `config.yaml` itself
+  is per-project and gitignored.
 - `rules/` — `scenic.smk` is included; `jbrowse.smk`, `numbat.smk` and
   `pileup_and_phase.smk` are not wired into the Snakefile.
 - `src/` — R, Python and shell scripts called by the rules (not `scripts/`).
@@ -29,10 +31,17 @@ checksum (Xenium deliveries ship no `md5sums.txt`):
 
 ```bash
 mkdir -p logs/rsync_xenium
-sbatch src/rsync_xenium.sh /path/to/delivery/0926X-02_GaneA data/0926X-02_GaneA
+sbatch src/rsync_xenium.sh /path/to/delivery/<order> data/<order>
 ```
 
 ## Running
+
+Create the project config first; the Snakefile stops if `config.yaml` is
+missing:
+
+```bash
+cp config.example.yaml config.yaml   # then set paths, email, slurm_account
+```
 
 Snakemake lives in a conda environment, not a module:
 
@@ -51,7 +60,7 @@ sbatch src/run_xenium_anndata.sh   # per-sample AnnData (rule xenium_anndata_all
 There is no sample list to maintain. Every `experiment.xenium` found under
 `xenium.data_root` (recursively) marks one region output directory. The sample
 id is `<slide_id>_<region_name>`, both read from that manifest, e.g.
-`0120633_b16_10724_tumor`; the slide prefix keeps ids unique if a region name
+`0012345_tumor_1`; the slide prefix keeps ids unique if a region name
 is reused on another slide. A duplicate id stops the workflow at parse time.
 
 ```yaml
@@ -89,9 +98,8 @@ runs every sample inside one 16-core allocation) writes
 `output/xenium/anndata/<sample>.h5ad` with `src/xenium_to_anndata.py`:
 
 1. `cell_feature_matrix.h5`, gene expression features only (control probes
-   and codewords dropped); cell metadata from `cells.csv.gz`. The
-   `cells.parquet` files in this delivery fail to read ("Unexpected end of
-   stream") for 12 of 15 regions, so the CSV is used.
+   and codewords dropped); cell metadata from `cells.csv.gz`, which reads
+   reliably where some deliveries ship truncated `cells.parquet` files.
 2. Keep cells with at least 10 genes (`xenium.min_genes`) and genes seen in at
    least 5 cells (`xenium.min_cells`).
 3. Normalize by cell size: counts / `cell_area` x 100 µm²
@@ -127,12 +135,13 @@ dotplot):
 
 ```yaml
 merge_groups:
-  merged: "*"                      # all 15 samples
-  slide_0120636: "0120636_*"       # the 8 regions on slide 0120636
+  merged: "*"                      # all samples
+  slide_0012345: "0012345_*"       # every region on slide 0012345
 ```
 
 Build one group with
-`snakemake output/xenium/anndata/merged/plots/slide_0120636/markers.csv`.
+`snakemake output/xenium/anndata/merged/plots/<group>/markers.csv`, or on
+SLURM `sbatch src/submit_merge_plots.sh <group> [group ...]`.
 
 Other downstream analysis of the region outputs is done in notebooks: see `src/read_in_xenium.ipynb`, `src/samui_xenium_process.py` and
 `src/subset_xenium_by_coordinates_and_combine.py`.
@@ -166,3 +175,5 @@ Legacy, and broken as written — do not expect these to run without repair:
 ## Documentation
 - `rules/README.md` — downstream analysis rules.
 - `docs/prep_geo_data.md` — GEO submission staging.
+- `docs/Xenium_template.xlsx` — GEO's blank Xenium metadata template.
+- `docs/local/` — project-specific notes and results (gitignored).
