@@ -23,6 +23,13 @@ slurm_gpu_account: ""
 # multiqc container for rule multiqc
 multiqc_sif: "/path/to/multiqc-1.20.sif"
 
+# Project report (rule xenium_report -> <output>/Xenium_Project_Report.pdf)
+report:
+  author: ""
+  # python with reportlab, pandas, pyyaml and Pillow; build it with
+  # pixi install --manifest-path envs/report/pixi.toml
+  python: "envs/report/.pixi/envs/default/bin/python"
+
 # Input/Output paths
 paths: 
   fastqs: "data/FASTQ"

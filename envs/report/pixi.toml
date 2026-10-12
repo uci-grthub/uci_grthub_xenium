@@ -1,0 +1,15 @@
+# Python for the PDF project report (rule xenium_report,
+# src/generate_xenium_report.py). Install with:
+#   pixi install --manifest-path envs/report/pixi.toml
+# which creates envs/report/.pixi/envs/default/bin/python (config report.python).
+[workspace]
+name = "xenium-report"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+reportlab = ">=4,<5"
+pandas = "*"
+pyyaml = "*"
+pillow = "*"

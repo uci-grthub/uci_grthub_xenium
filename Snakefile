@@ -341,6 +341,63 @@ rule xenium_qc_by_slide:
         """
 
 
+# Rule: cells/genes/clusters and preprocessing parameters of every AnnData
+# object, as JSON for the report (the report env has no anndata);
+# see src/xenium_report_stats.py
+rule xenium_report_stats:
+    input:
+        h5ads = expand(f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
+                       sample=sorted(XENIUM_SAMPLES)),
+        merged = expand(f"{OUTPUT_DIR}/xenium/anndata/merged/{{group}}.h5ad",
+                        group=sorted(XENIUM_MERGE_GROUPS))
+    output:
+        json = f"{OUTPUT_DIR}/xenium/report_stats.json"
+    log:
+        "logs/xenium_report_stats.log"
+    params:
+        script = "src/xenium_report_stats.py",
+        python = XENIUM.get("python", "python")
+    threads: 1
+    resources:
+        mem_mb = 16000
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} \
+            --h5ads {input.h5ads} --merged {input.merged} \
+            --out {output.json} > {log} 2>&1
+        """
+
+
+# Rule: PDF project report (run, panel, pipeline parameters, per-sample QC
+# and filtering, merged objects with their UMAPs, output files);
+# see src/generate_xenium_report.py. report.python needs reportlab, pandas,
+# pyyaml and Pillow.
+rule xenium_report:
+    input:
+        metrics = f"{OUTPUT_DIR}/xenium/metrics_summary.csv",
+        stats = f"{OUTPUT_DIR}/xenium/report_stats.json",
+        experiments = [os.path.join(XENIUM_SAMPLES[s]["dir"], "experiment.xenium")
+                       for s in sorted(XENIUM_SAMPLES)],
+        umaps = expand(f"{OUTPUT_DIR}/xenium/anndata/merged/plots/{{group}}/umap.png",
+                       group=sorted(XENIUM_MERGE_GROUPS)),
+        config = "config.yaml"
+    output:
+        pdf = f"{OUTPUT_DIR}/Xenium_Project_Report.pdf"
+    log:
+        "logs/xenium_report.log"
+    params:
+        script = "src/generate_xenium_report.py",
+        python = (config.get("report") or {}).get("python", "envs/report/.pixi/envs/default/bin/python")
+    shell:
+        """
+        PYTHONNOUSERSITE=1 {params.python} {params.script} --metrics {input.metrics} --stats {input.stats} \
+            --experiments {input.experiments:q} --umaps {input.umaps} \
+            --config {input.config} --out {output.pdf} > {log} 2>&1
+        """
+
+localrules: xenium_report
+
+
 # Rule: Xenium sample -> AnnData (QC filter, cell-area normalization,
 # PCA/UMAP/Leiden); see src/xenium_to_anndata.py
 rule xenium_anndata:

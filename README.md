@@ -147,6 +147,25 @@ Build one group with
 `snakemake output/xenium/anndata/merged/plots/<group>/markers.csv`, or on
 SLURM `sbatch src/submit_merge_plots.sh <group> [group ...]`.
 
+### Project report
+
+`snakemake xenium_report` (or `sbatch src/submit_report.sh`) writes
+`output/Xenium_Project_Report.pdf`: project and run information, summary
+statistics, panel and software versions, the pipeline with its parameters,
+per-sample Xenium QC and filtering (cells before/after QC, median transcripts
+and genes, Q20 decoded, transcripts assigned, clusters), every merged object
+with its UMAP, and the output files. Set the author in `config.yaml`
+(`report.author`).
+
+Two rules build it: `xenium_report_stats` reads every per-sample and merged
+`.h5ad` (backed, in the `xenium.python` env) into
+`output/xenium/report_stats.json` with `src/xenium_report_stats.py`;
+`xenium_report` renders the PDF with `src/generate_xenium_report.py`
+(reportlab; interpreter set by `report.python`, by default the pixi env in
+`envs/report/`, built once with `pixi install --manifest-path envs/report/pixi.toml`). The report describes each merged
+object's batch correction as it was built and flags objects that no longer
+match `xenium.batch_correction`.
+
 Other downstream analysis of the region outputs is done in notebooks: see `src/read_in_xenium.ipynb`, `src/samui_xenium_process.py` and
 `src/subset_xenium_by_coordinates_and_combine.py`.
 
