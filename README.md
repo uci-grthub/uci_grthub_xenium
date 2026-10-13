@@ -183,6 +183,13 @@ The reference is normal tissue: it has no melanocytes or tumor cells, so
 tumor cells get the nearest reference label with a low mapping score. Check
 `azimuth_mapping_score` as well before trusting a label in tumor samples.
 
+For merged objects, `sbatch src/submit_merged_azimuth_plots.sh <merged.h5ad> ...`
+runs `src/plot_merged_azimuth.py`. It joins the per-sample predictions onto
+the merged cells, applies the same threshold, and writes `umap_azimuth.png`
+(cell type and Leiden), `umap_azimuth_scores.png`, `azimuth_composition.png`
+(cell types per sample) and `azimuth_vs_leiden.png` to
+`<dir>/plots/<group>/`.
+
 The R steps use the pixi env in `envs/azimuth/` (Seurat 5, Azimuth 0.5.0;
 locked in `pixi.lock`, GitHub packages pinned to commits), built once with
 `sbatch src/install_azimuth_env.sh`.
