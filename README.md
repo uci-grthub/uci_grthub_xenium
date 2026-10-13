@@ -15,7 +15,7 @@ which is gitignored.
 - `config.example.yaml` — template for `config.yaml` (paths, per-rule
   parameters, merge groups, mail address, SLURM accounts). `config.yaml` itself
   is per-project and gitignored.
-- `rules/` — `scenic.smk` is included; `jbrowse.smk`, `numbat.smk` and
+- `rules/` — `scenic.smk` and `azimuth.smk` are included; `jbrowse.smk`, `numbat.smk` and
   `pileup_and_phase.smk` are not wired into the Snakefile.
 - `src/` — R, Python and shell scripts called by the rules (not `scripts/`).
 - `data/` — the Xenium delivery, mirrored by `src/rsync_xenium.sh`:
@@ -147,6 +147,46 @@ Build one group with
 `snakemake output/xenium/anndata/merged/plots/<group>/markers.csv`, or on
 SLURM `sbatch src/submit_merge_plots.sh <group> [group ...]`.
 
+### Cell type annotation (Azimuth)
+
+`snakemake xenium_azimuth_all` (submitted by `src/run_azimuth_annotation.sh`)
+labels every per-sample object with Azimuth (`rules/azimuth.smk`). Azimuth
+has no mouse skin reference, so one is built from a labeled CELLxGENE atlas,
+by default Tabula Muris Senis 10x (`azimuth.reference_url`):
+
+1. `azimuth_reference_download`: the atlas `.h5ad` to
+   `data/reference/azimuth/reference.h5ad`.
+2. `azimuth_reference_export` (`src/h5ad_to_mtx.py`): raw counts of the cell
+   types in `azimuth.keep_labels` (types that occur in skin and skin tumors;
+   organ-specific types dropped), at most `azimuth.max_cells_per_label` each,
+   panel genes only (matched by Ensembl id from `gene_panel.json`, renamed to
+   the panel's symbols).
+3. `azimuth_reference_build` (`src/build_azimuth_reference.R`): SCTransform
+   v2, PCA, UMAP and `AzimuthReference` -> `output/xenium/azimuth/reference/`
+   (`ref.Rds`, `idx.annoy`, `reference_umap.png`).
+4. `xenium_azimuth` (`src/run_azimuth.R`): `RunAzimuth` on each sample's
+   `layers["counts"]` -> `output/xenium/azimuth/<sample>_predictions.csv`.
+5. `xenium_azimuth_annotate` (`src/add_azimuth_labels.py`):
+   `output/xenium/anndata/annotated/<sample>.h5ad` with
+   `obs["azimuth_cell_type"]` (thresholded), `obs["azimuth_cell_type_raw"]`,
+   `obs["azimuth_cell_type_score"]`,
+   `obs["azimuth_mapping_score"]` and `obsm["X_azimuth_refumap"]`, and plots
+   in `plots/<sample>/` (`azimuth_spatial.png`, `azimuth_umap.png`,
+   `azimuth_scores.png`, `azimuth_vs_leiden.png`).
+
+Cells with a prediction score below `azimuth.min_prediction_score` (0.5)
+are labeled `unassigned` in `obs["azimuth_cell_type"]`; Azimuth's label for
+every cell stays in `obs["azimuth_cell_type_raw"]`. Without the threshold,
+low-count cells land on immune types they do not express.
+
+The reference is normal tissue: it has no melanocytes or tumor cells, so
+tumor cells get the nearest reference label with a low mapping score. Check
+`azimuth_mapping_score` as well before trusting a label in tumor samples.
+
+The R steps use the pixi env in `envs/azimuth/` (Seurat 5, Azimuth 0.5.0;
+locked in `pixi.lock`, GitHub packages pinned to commits), built once with
+`sbatch src/install_azimuth_env.sh`.
+
 ### Project report
 
 `snakemake xenium_report` (or `sbatch src/submit_report.sh`) writes
@@ -175,6 +215,8 @@ Other downstream analysis of the region outputs is done in notebooks: see `src/r
   `snakemake_dfs`).
 - scanpy, leidenalg and igraph for the AnnData rule (`xenium.python`, default
   the `squidpy_dfs` env).
+- R 4.4 with Seurat 5 and Azimuth for the cell type annotation rules
+  (`azimuth.rscript`, the pixi env in `envs/azimuth/`).
 - CellRanger 8.0.1 (module) for the single-cell rules only.
 
 ## Other rules in this repository

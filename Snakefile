@@ -429,6 +429,10 @@ rule xenium_anndata:
         """
 
 
+# Azimuth cell type annotation (rule xenium_azimuth_all); see rules/azimuth.smk
+include: "rules/azimuth.smk"
+
+
 # Helper function to get FASTQ files for a sample
 def get_fastq_files(wildcards, read):
     """Get R1 or R2 FASTQ file for a sample"""

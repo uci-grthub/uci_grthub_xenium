@@ -71,6 +71,70 @@ xenium:
     merged: "*"
     # slide_0012345: "0012345_*"
 
+# Azimuth cell type annotation (rule xenium_azimuth_all, rules/azimuth.smk):
+# a reference built from a labeled CELLxGENE scRNA-seq atlas, restricted to
+# the Xenium panel genes, mapped onto each sample's raw counts
+azimuth:
+  # Rscript with Seurat 5 + Azimuth; build once with sbatch src/install_azimuth_env.sh
+  rscript: "envs/azimuth/.pixi/envs/default/bin/Rscript"
+  # CELLxGENE dataset .h5ad (raw counts in raw/X); default Tabula Muris Senis
+  # 10x, all tissues (3.7 GB)
+  reference_url: "https://datasets.cellxgene.cziscience.com/084058cc-4f17-43ce-b14e-1278df074013.h5ad"
+  # reference obs columns to transfer; the first one is subset and plotted
+  label_columns: ["cell_type"]
+  # reference cells kept, by the first label column: cell types that can
+  # occur in skin and skin tumors (organ-specific types, progenitors and vague
+  # labels like "leukocyte" dropped); empty keeps every cell
+  keep_labels:
+    # epidermis
+    - "basal cell of epidermis"
+    - "epidermal cell"
+    - "keratinocyte"
+    - "keratinocyte stem cell"
+    - "stem cell of epidermis"
+    # stroma, vasculature, nerve, muscle (panniculus carnosus)
+    - "fibroblast"
+    - "endothelial cell"
+    - "vein endothelial cell"
+    - "endothelial cell of lymphatic vessel"
+    - "pericyte"
+    - "smooth muscle cell"
+    - "Schwann cell"
+    - "cell of skeletal muscle"
+    # lymphoid
+    - "B cell"
+    - "naive B cell"
+    - "plasma cell"
+    - "T cell"
+    - "CD4-positive, alpha-beta T cell"
+    - "CD8-positive, alpha-beta T cell"
+    - "regulatory T cell"
+    - "naive T cell"
+    - "mature NK T cell"
+    - "natural killer cell"
+    # myeloid
+    - "macrophage"
+    - "classical monocyte"
+    - "non-classical monocyte"
+    - "intermediate monocyte"
+    - "monocyte"
+    - "dendritic cell"
+    - "myeloid dendritic cell"
+    - "plasmacytoid dendritic cell"
+    - "Langerhans cell"
+    - "neutrophil"
+    - "mast cell"
+    - "basophil"
+  # random subsample per cell type, keeps the reference small and balanced
+  max_cells_per_label: 2000
+  # cells whose prediction score (Azimuth's confidence in the label, 0-1) is
+  # below this are labeled "unassigned"; the label is kept in
+  # azimuth_<label>_raw. 0.5 drops low-count cells that Azimuth otherwise
+  # puts on immune types they do not express (e.g. 15% "plasma cells" with
+  # no Mzb1 in normal skin)
+  min_prediction_score: 0.5
+  dims: 50
+
 # scVI integration parameters
 min_genes: 200
 min_cells: 5
