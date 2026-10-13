@@ -1,0 +1,53 @@
+# R for Azimuth cell type annotation (rules/azimuth.smk). Install with:
+#   pixi install --manifest-path envs/azimuth/pixi.toml
+#   pixi run --manifest-path envs/azimuth/pixi.toml install-azimuth
+# which creates envs/azimuth/.pixi/envs/default/bin/Rscript (config azimuth.rscript).
+# Azimuth v0.5.0 and its GitHub-only dependencies (presto, SeuratData,
+# SeuratDisk) are not on conda; install-azimuth adds them at pinned commits.
+[workspace]
+name = "xenium-azimuth"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+[dependencies]
+r-base = "4.4.*"
+r-seurat = "5.*"
+r-seuratobject = "5.*"
+r-matrix = "*"
+"r-data.table" = "*"
+r-remotes = "*"
+r-biocmanager = "*"
+r-hdf5r = "*"
+r-ggplot2 = "*"
+r-patchwork = "*"
+r-signac = "*"
+r-dt = "*"
+r-googlesheets4 = "*"
+r-plotly = "*"
+r-shiny = "*"
+r-shinybs = "*"
+r-shinydashboard = "*"
+r-shinyjs = "*"
+bioconductor-glmgampoi = "*"
+bioconductor-tfbstools = "*"
+bioconductor-ensembldb = "*"
+bioconductor-bsgenome = "*"
+compilers = "*"
+make = "*"
+
+[tasks]
+# Bioconductor data packages come from BiocManager at the Bioc release that
+# matches the conda bioconductor-* packages (3.20 for R 4.4): their bioconda
+# builds fetch the data in post-link scripts, which pixi does not run
+# (GenomeInfoDbData and GO.db are pulled in by conda packages but empty).
+# GitHub packages are pinned to commits so the env rebuilds identically.
+install-azimuth = """Rscript -e 'options(repos = c(CRAN = "https://cloud.r-project.org")); \
+BiocManager::install(c("GenomeInfoDbData", "GO.db", "BSgenome.Hsapiens.UCSC.hg38", \
+                       "EnsDb.Hsapiens.v86", "JASPAR2020"), \
+                     version = "3.20", update = FALSE, ask = FALSE); \
+pkgs <- c("immunogenomics/presto@b5df6ee6097eb62522f2e557aa93ac21bab2d05f", \
+          "satijalab/seurat-data@3e51f44303069b64f5dc4d68e6a3d4a343f55c39", \
+          "mojaveazure/seurat-disk@877d4e18ab38c686f5db54f8cd290274ccdbe295", \
+          "satijalab/azimuth@51e852319b8ce79135d568308fa95efd4404291b"); \
+for (p in pkgs) remotes::install_github(p, upgrade = "never", dependencies = FALSE); \
+library(Azimuth)'"""
