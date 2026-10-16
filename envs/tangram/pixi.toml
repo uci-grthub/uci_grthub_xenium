@@ -1,0 +1,28 @@
+# Python for Tangram cell type annotation (src/run_tangram.py). Install with:
+#   sbatch src/install_tangram_env.sh
+# which runs pixi install --manifest-path envs/tangram/pixi.toml and creates
+# envs/tangram/.pixi/envs/default/bin/python (config tangram.python).
+[workspace]
+name = "xenium-tangram"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.11.*"
+pytorch = { version = "2.*", build = "cpu*" }
+scanpy = "1.10.*"
+anndata = "*"
+scipy = "*"
+pandas = "*"
+matplotlib = "*"
+pyyaml = "*"
+
+[pypi-dependencies]
+tangram-sc = "==1.0.4"
+
+# Interactive Python with anndata/scanpy/pandas/numpy imported, started in the
+# directory pixi was called from (run from the repo root):
+#   pixi run -m envs/tangram py
+[tasks.py]
+cmd = """python -i -c "import os; os.chdir(os.environ['INIT_CWD']); \
+import anndata as ad, scanpy as sc, pandas as pd, numpy as np" """

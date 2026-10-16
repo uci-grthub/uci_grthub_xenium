@@ -30,3 +30,5 @@ docs/local/
 
 # per-project config; config.example.yaml is the tracked template
 config.yaml
+Xenium_Project_Report.pdf
+.ipynb_checkpoints/Xenium_Project_Report-checkpoint.pdf
