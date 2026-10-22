@@ -7,10 +7,15 @@
 # are restricted to those in <genes.tsv> (first column with gene symbols, e.g.
 # a Xenium cell_feature_matrix/features.tsv.gz, whose second column is used).
 #
+# <overrides.csv> (optional) relabels cells before subsampling: columns cell
+# and <label_column>, e.g. tumor subtypes from a subclustered object whose
+# cells are a subset of this one.
+#
 # Writes <outdir>/<group>/{matrix.mtx.gz,features.tsv.gz,barcodes.tsv.gz,obs.csv.gz}
 #
 # Usage: Rscript src/export_rds_counts.R <file.rds> <outdir> <label_column>
 #            <group_column> <genes.tsv(.gz)> [max_per_label] [min_per_label]
+#            [overrides.csv(.gz)]
 suppressPackageStartupMessages({
     library(SeuratObject)
     library(Matrix)
@@ -25,6 +30,7 @@ group_col <- args[4]
 genes_file <- args[5]
 max_per_label <- if (length(args) >= 6) as.integer(args[6]) else 2000L
 min_per_label <- if (length(args) >= 7) as.integer(args[7]) else 20L
+overrides_file <- if (length(args) >= 8) args[8] else NA
 
 panel <- data.table::fread(genes_file, header = FALSE)
 # Xenium features.tsv: id, symbol, type; keep gene rows, use the symbol
@@ -38,6 +44,14 @@ rna <- obj[["RNA"]]
 counts <- if (inherits(rna, "Assay5")) LayerData(rna, layer = "counts") else rna@counts
 rm(obj, rna)
 invisible(gc())
+
+if (!is.na(overrides_file)) {
+    ov <- data.table::fread(overrides_file)
+    ov <- ov[ov$cell %in% rownames(meta)]
+    cat(nrow(ov), "cells relabeled from", overrides_file, "\n")
+    meta[[label_col]] <- as.character(meta[[label_col]])
+    meta[ov$cell, label_col] <- ov[[label_col]]
+}
 
 genes <- intersect(rownames(counts), panel)
 cat(length(genes), "of", length(unique(panel)), "panel genes in the reference\n")

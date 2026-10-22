@@ -15,7 +15,7 @@
 # 96G fits the 12.6 GB GSE279468 whole-skin object (peak ~50 GB to load).
 # Usage, from the repository root:
 #   sbatch src/export_rds_counts.sh <file.rds> <outdir> <label_column> <group_column> \
-#       <xenium features.tsv.gz> [max_per_label] [min_per_label]
+#       <xenium features.tsv.gz> [max_per_label] [min_per_label] [overrides.csv]
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
