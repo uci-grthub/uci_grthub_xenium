@@ -16,7 +16,8 @@ label's score.
 Reference types whose markers are not on the panel (--drop-labels, e.g. RBC:
 no hemoglobin genes on the Xenium 5K panel) are removed first; otherwise
 they attract cells with little signal. Cells with fewer than --min-counts
-transcripts are not mapped and are labeled "low_counts".
+transcripts are not mapped and are labeled "low_counts". With --cells (one
+cell id per line, e.g. from src/gate_subtype.py) only those cells are used.
 
 Writes --predictions, a CSV with cell_id, tangram_<label>,
 tangram_<label>_score, total_counts and the per-type probabilities
@@ -93,6 +94,7 @@ def main():
     parser.add_argument("--label", default="cell_type_015", help="reference obs label column")
     parser.add_argument("--drop-labels", nargs="*", default=[],
                         help="reference cell types to remove before mapping")
+    parser.add_argument("--cells", help="file of cell ids to annotate (default all)")
     parser.add_argument("--min-counts", type=int, default=50,
                         help="cells with fewer transcripts are not mapped (low_counts)")
     parser.add_argument("--n-markers", type=int, default=100,
@@ -113,6 +115,9 @@ def annotate(args, name, key):
     """Run Tangram; returns the Xenium object and the predictions (written to CSV)."""
     ref = read_reference(args.reference, args.label)
     spatial = read_spatial(args.h5ad)
+    if args.cells:
+        cells = pd.read_csv(args.cells, header=None).iloc[:, 0]
+        spatial = spatial[spatial.obs_names.isin(cells)].copy()
     ref = ref[~ref.obs[args.label].isin(args.drop_labels)].copy()
     ref.obs[args.label] = ref.obs[args.label].cat.remove_unused_categories()
     print(f"reference {ref.shape} (dropped: {', '.join(args.drop_labels) or 'none'}), "

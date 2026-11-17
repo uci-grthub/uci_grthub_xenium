@@ -24,7 +24,8 @@ Two uses:
 With --panel, genes are matched to the Xenium panel by Ensembl id and renamed
 to the panel's gene symbols, so reference and query share feature names. Cells
 are selected (--keep-labels, --max-cells-per-label) before the count matrix is
-read, so only those rows of a large atlas are loaded.
+read, so only those rows of a large atlas are loaded. --cells (one cell id
+per line) keeps only those cells.
 """
 import argparse
 import gzip
@@ -92,6 +93,7 @@ def main():
     parser.add_argument("--max-cells-per-label", type=int, default=0,
                         help="random subsample per label; 0 keeps all")
     parser.add_argument("--obs-columns", nargs="*", default=[])
+    parser.add_argument("--cells", help="file of cell ids to export (default all)")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -102,6 +104,9 @@ def main():
 
         rows = select_cells(obs, args.label_column, json.loads(args.keep_labels),
                             args.max_cells_per_label, args.seed)
+        if args.cells:
+            cells = pd.read_csv(args.cells, header=None).iloc[:, 0]
+            rows = rows[obs.index[rows].isin(cells)]
         counts = read_counts(f, args.layer, rows)
     obs = obs.iloc[rows]
 

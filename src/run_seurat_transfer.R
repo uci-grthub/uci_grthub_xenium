@@ -8,7 +8,8 @@
 # obs.csv.gz). The reference is restricted to genes present in the query, its
 # variable genes are the anchor features, and its PCA is the space the query
 # is projected into. Anchors are found per sample (sample_id), so each sample
-# is transferred on its own against the same reference.
+# is transferred on its own against the same reference; samples with fewer
+# than --min-sample-cells transferred cells are pooled into one batch.
 #
 # --normalization SCT (default): the reference is SCTransformed (v2,
 # glmGamPoi) and the query residuals are computed from the reference's SCT
@@ -28,7 +29,7 @@
 #   Rscript src/run_seurat_transfer.R --query-mtx <dir> --reference <dir> \
 #       --out <csv> [--label cell_type_015] [--drop-labels RBC] \
 #       [--min-counts 50] [--dims 30] [--nfeatures 2000] \
-#       [--normalization SCT|LogNormalize]
+#       [--normalization SCT|LogNormalize] [--min-sample-cells 0]
 
 suppressPackageStartupMessages({
   library(Seurat)
@@ -53,7 +54,7 @@ opts <- parse_args(commandArgs(trailingOnly = TRUE),
                    list(`query-mtx` = NULL, reference = NULL, out = NULL,
                         label = "cell_type_015", `drop-labels` = "",
                         `min-counts` = "50", dims = "30", nfeatures = "2000",
-                        normalization = "SCT"))
+                        normalization = "SCT", `min-sample-cells` = "0"))
 normalization <- match.arg(opts$normalization, c("SCT", "LogNormalize"))
 sct <- normalization == "SCT"
 label <- opts$label
@@ -136,6 +137,15 @@ transfer_sample <- function(cells) {
 }
 
 samples <- qmeta[colnames(qcounts), "sample_id"]
+# samples with fewer than --min-sample-cells transferred cells are anchored
+# together (too few cells for anchors of their own)
+n_sample <- table(samples[keep])
+small <- names(n_sample)[n_sample < as.integer(opts[["min-sample-cells"]])]
+if (length(small)) {
+  message(sprintf("pooled %d samples with < %s cells: %s", length(small),
+                  opts[["min-sample-cells"]], paste(small, collapse = ", ")))
+  samples[samples %in% small] <- "small_samples"
+}
 parts <- list()
 for (s in sort(unique(samples[keep]))) {
   message(s)

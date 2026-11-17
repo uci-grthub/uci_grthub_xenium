@@ -73,27 +73,54 @@ rule xenium_celltype_methods_spatial:
         """
 
 
-# Target rule: Tangram cell types in obs of every per-sample AnnData
+# obs column written per transfer method (a key of CELLTYPE_TRANSFER)
+TRANSFER_OBS_COLUMNS = {"tangram": "tangram_cell_type", "seurat_sct": "seurat_celltype"}
+
+# merged-object directories under anndata/ that get transfer obs columns:
+# merged/ (rule xenium_merge) and merged_nocorrection/ (same cells, made
+# outside Snakemake)
+TRANSFER_OBS_MERGED_DIRS = ["merged", "merged_nocorrection"]
+
+
+def transfer_obs_done(method):
+    """.done flags of every per-sample and merged object for one method."""
+    return (expand(f"{OUTPUT_DIR}/xenium/anndata/{method}_obs/{{sample}}.done",
+                   sample=sorted(XENIUM_SAMPLES))
+            + expand(f"{OUTPUT_DIR}/xenium/anndata/{method}_obs/{{mdir}}/{{group}}.done",
+                     mdir=TRANSFER_OBS_MERGED_DIRS, group=sorted(XENIUM_MERGE_GROUPS)))
+
+
+# Target rule: Tangram cell types in obs of every per-sample and merged AnnData
 rule xenium_tangram_obs_all:
     input:
-        expand(f"{OUTPUT_DIR}/xenium/anndata/tangram_obs/{{sample}}.done",
-               sample=sorted(XENIUM_SAMPLES))
+        transfer_obs_done("tangram")
 
 
-# Rule: add tangram_cell_type and tangram_cell_type_score to obs of
+# Target rule: Seurat (SCT) cell types in obs of every per-sample and merged
+# AnnData
+rule xenium_seurat_obs_all:
+    input:
+        transfer_obs_done("seurat_sct")
+
+
+# Rule: add <column> and <column>_score (TRANSFER_OBS_COLUMNS) to obs of
 # <sample>.h5ad in place (mtime kept); the .done flag is the output. See
-# src/add_tangram_obs.py
-rule xenium_tangram_obs:
+# src/add_transfer_obs.py
+rule xenium_transfer_obs:
     input:
         h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{sample}}.h5ad",
-        tangram = lambda wildcards: celltype_transfer_csvs(wildcards)["tangram"]
+        predictions = lambda wildcards: celltype_transfer_csvs(wildcards)[wildcards.method]
     output:
-        touch(f"{OUTPUT_DIR}/xenium/anndata/tangram_obs/{{sample}}.done")
+        touch(f"{OUTPUT_DIR}/xenium/anndata/{{method}}_obs/{{sample}}.done")
+    wildcard_constraints:
+        method = "|".join(TRANSFER_OBS_COLUMNS),
+        sample = "[^/]+"
     log:
-        "logs/tangram_obs/{sample}.log"
+        "logs/{method}_obs/{sample}.log"
     params:
-        script = "src/add_tangram_obs.py",
+        script = "src/add_transfer_obs.py",
         python = XENIUM.get("python", "python"),
+        column = lambda wildcards: TRANSFER_OBS_COLUMNS[wildcards.method],
         label = CELLTYPE_METHODS.get("label", "cell_type_015"),
         min_score = CELLTYPE_METHODS.get("min_score", 0.5)
     threads: 1
@@ -102,38 +129,28 @@ rule xenium_tangram_obs:
     shell:
         """
         PYTHONNOUSERSITE=1 {params.python} {params.script} --h5ad {input.h5ad} \
-            --tangram {input.tangram} --label {params.label} \
+            --method {wildcards.method} --predictions {input.predictions} \
+            --column {params.column} --label {params.label} \
             --min-score {params.min_score} > {log} 2>&1
         """
 
 
-# merged-object directories under anndata/ that get Tangram obs columns:
-# merged/ (rule xenium_merge) and merged_nocorrection/ (same cells, made
-# outside Snakemake)
-TANGRAM_OBS_MERGED_DIRS = ["merged", "merged_nocorrection"]
-
-
-# Target rule: Tangram cell types in obs of every merged object
-rule xenium_tangram_obs_merged_all:
-    input:
-        expand(f"{OUTPUT_DIR}/xenium/anndata/tangram_obs/{{mdir}}/{{group}}.done",
-               mdir=TANGRAM_OBS_MERGED_DIRS, group=sorted(XENIUM_MERGE_GROUPS))
-
-
-# Rule: as xenium_tangram_obs, for anndata/<mdir>/<group>.h5ad
-rule xenium_tangram_obs_merged:
+# Rule: as xenium_transfer_obs, for anndata/<mdir>/<group>.h5ad
+rule xenium_transfer_obs_merged:
     input:
         h5ad = f"{OUTPUT_DIR}/xenium/anndata/{{mdir}}/{{group}}.h5ad",
-        tangram = lambda wildcards: CELLTYPE_TRANSFER["tangram"].format(group=wildcards.group)
+        predictions = lambda wildcards: CELLTYPE_TRANSFER[wildcards.method].format(group=wildcards.group)
     output:
-        touch(f"{OUTPUT_DIR}/xenium/anndata/tangram_obs/{{mdir}}/{{group}}.done")
+        touch(f"{OUTPUT_DIR}/xenium/anndata/{{method}}_obs/{{mdir}}/{{group}}.done")
     wildcard_constraints:
-        mdir = "|".join(TANGRAM_OBS_MERGED_DIRS)
+        method = "|".join(TRANSFER_OBS_COLUMNS),
+        mdir = "|".join(TRANSFER_OBS_MERGED_DIRS)
     log:
-        "logs/tangram_obs/{mdir}/{group}.log"
+        "logs/{method}_obs/{mdir}/{group}.log"
     params:
-        script = "src/add_tangram_obs.py",
+        script = "src/add_transfer_obs.py",
         python = XENIUM.get("python", "python"),
+        column = lambda wildcards: TRANSFER_OBS_COLUMNS[wildcards.method],
         label = CELLTYPE_METHODS.get("label", "cell_type_015"),
         min_score = CELLTYPE_METHODS.get("min_score", 0.5)
     threads: 1
@@ -142,6 +159,7 @@ rule xenium_tangram_obs_merged:
     shell:
         """
         PYTHONNOUSERSITE=1 {params.python} {params.script} --h5ad {input.h5ad} \
-            --tangram {input.tangram} --label {params.label} \
+            --method {wildcards.method} --predictions {input.predictions} \
+            --column {params.column} --label {params.label} \
             --min-score {params.min_score} > {log} 2>&1
         """

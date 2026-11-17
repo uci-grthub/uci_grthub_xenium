@@ -22,24 +22,32 @@
 # The skin slide peaked at 3.9 GB with LogNormalize; SCT query residuals for
 # the 563k-cell yum17 sample add ~9 GB, so 96G for the tumor slide.
 # Usage, from the repository root:
-#   sbatch src/submit_seurat_transfer.sh <group> <reference dir> [SCT|LogNormalize] [tag]
-# A tag (e.g. subtype, for data/reference/tangram_subtype) keeps the coarse
+#   sbatch src/submit_seurat_transfer.sh <group> <reference dir> [SCT|LogNormalize] [tag] [gate csv]
+# A tag (e.g. subtype, for data/reference/tumor_subtype) keeps the coarse
 # results: predictions go to <group>_<tag>_predictions<suffix>.csv, plots to
 # plots/<group>/<tag>/.
+# A gate csv (coarse predictions of the same slide and normalization) maps
+# only the cells it labels Tumor, Melanocyte or Schwann_cell (score >= 0.5)
+# with the reference; the other cells keep their coarse label
+# (src/gate_subtype.py). Samples with < 100 gated cells are anchored together.
+# The gated run alone is kept as <group>_<tag>_gated_predictions<suffix>.csv.
 # e.g.
 #   sbatch src/submit_seurat_transfer.sh slide_0120636 data/reference/tangram/Skin
 #   sbatch src/submit_seurat_transfer.sh slide_0120633 data/reference/tangram/Tumor
+#   sbatch src/submit_seurat_transfer.sh slide_0120633 data/reference/tumor_subtype/Tumor \
+#       SCT subtype output/xenium/seurat_transfer/slide_0120633_predictions_sct.csv
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
-if [ $# -lt 2 ] || [ $# -gt 4 ]; then
-    echo "usage: sbatch $0 <group> <reference dir> [SCT|LogNormalize] [tag]" >&2
+if [ $# -lt 2 ] || [ $# -gt 5 ]; then
+    echo "usage: sbatch $0 <group> <reference dir> [SCT|LogNormalize] [tag] [gate csv]" >&2
     exit 1
 fi
 group=$1
 ref=$2
 normalization=${3:-SCT}
 tag=${4:-}
+gate=${5:-}
 case $normalization in
     SCT) method=seurat_sct; suffix=_sct ;;
     LogNormalize) method=seurat; suffix= ;;
@@ -61,11 +69,24 @@ predictions=$outdir/${group}${tag:+_$tag}_predictions${suffix}.csv
 query=$outdir/query_mtx/${group}_${method}${tag:+_$tag}
 trap 'rm -rf "$query"' EXIT
 
+gate_args=() transfer_args=() raw=$predictions
+if [ -n "$gate" ]; then
+    cells=$outdir/${group}${tag:+_$tag}_cells${suffix}.txt
+    raw=$outdir/${group}${tag:+_$tag}_gated_predictions${suffix}.csv
+    PYTHONNOUSERSITE=1 "$XENIUM_PYTHON" src/gate_subtype.py cells --coarse "$gate" \
+        --label "$label" --min-score "$min_score" --out "$cells"
+    gate_args=(--cells "$cells")
+    transfer_args=(--min-sample-cells 100)
+fi
 PYTHONNOUSERSITE=1 "$XENIUM_PYTHON" src/h5ad_to_mtx.py --h5ad "$anndata/merged/$group.h5ad" \
-    --layer counts --obs-columns sample_id --outdir "$query"
+    --layer counts --obs-columns sample_id "${gate_args[@]}" --outdir "$query"
 "$RSCRIPT" src/run_seurat_transfer.R --query-mtx "$query" --reference "$ref" \
-    --out "$predictions" --label "$label" --drop-labels RBC --min-counts 50 \
-    --normalization "$normalization"
+    --out "$raw" --label "$label" --drop-labels RBC --min-counts 50 \
+    --normalization "$normalization" "${transfer_args[@]}"
+if [ -n "$gate" ]; then
+    PYTHONNOUSERSITE=1 "$XENIUM_PYTHON" src/gate_subtype.py combine --coarse "$gate" \
+        --subtype "$raw" --cells "$cells" --label "$label" --out "$predictions"
+fi
 
 for dir in merged merged_nocorrection; do
     PYTHONNOUSERSITE=1 "$PLOT_PYTHON" src/plot_label_transfer.py --method "$method" \

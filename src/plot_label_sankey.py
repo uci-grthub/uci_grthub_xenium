@@ -2,7 +2,9 @@
 """
 Sankey (alluvial) diagram of cell type labels across label transfer runs of
 the same cells (src/run_tangram.py, src/run_seurat_transfer.R), e.g. Tangram
-and Seurat with the coarse and the tumor subtype reference.
+and Seurat with the coarse and the tumor subtype reference. Subtype runs
+gated on a coarse run (src/gate_subtype.py) carry the coarse label for the
+cells they left out, so those cells flow straight through.
 
 Each --predictions NAME=CSV is one column, in the order given. Labels are
 thresholded as in src/plot_label_transfer.py: transferred cells whose score is

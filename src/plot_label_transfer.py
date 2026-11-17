@@ -54,6 +54,9 @@ def add_predictions(adata, pred, key, min_score):
     if min_score:
         labels = labels.where((labels == LOW_COUNTS) | (score >= min_score), UNASSIGNED)
     types = sorted(c.removeprefix("prob_") for c in pred.columns if c.startswith("prob_"))
+    # labels without prob_ columns: coarse labels of cells a gated run
+    # (src/gate_subtype.py) left out
+    types += sorted(set(labels) - set(types) - set(GREYS))
     extra = [g for g in (UNASSIGNED, LOW_COUNTS) if (labels == g).any()]
     adata.obs[key] = pd.Categorical(labels, categories=types + extra)
     adata.obs[f"{key}_score"] = score.to_numpy()
