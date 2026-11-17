@@ -49,6 +49,18 @@ def load_xenium(xenium_dir, sample_id):
     return adata
 
 
+def drop_none(d):
+    """Remove None values from nested dict d (e.g. adata.uns), in place.
+
+    anndata >= 0.12 writes None as encoding-type "null", which anndata 0.11 cannot read.
+    """
+    for key in [k for k, v in d.items() if v is None]:
+        del d[key]
+    for v in d.values():
+        if isinstance(v, dict):
+            drop_none(v)
+
+
 def cell_size_normalize(adata, target_area):
     """
     counts / cell_area * target_area, then log1p.
@@ -133,6 +145,7 @@ def main():
         "leiden_resolution": args.resolution,
     }
 
+    drop_none(adata.uns)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     adata.write_h5ad(args.out, compression="gzip")
     print(f"{args.sample_id}: {n_cells_raw} -> {adata.n_obs} cells, "

@@ -59,6 +59,11 @@ xenium:
   min_genes: 10
   min_cells: 5
   leiden_resolution: 0.3
+  # per-slide override of leiden_resolution for merged objects whose samples
+  # all come from that slide; keys are slide ids (quote them, or YAML reads
+  # 0012345 as an octal int). Per-sample objects use leiden_resolution
+  leiden_resolution_by_slide: {}
+    # "0012345": 0.5
   # normalization: counts / cell_area * target_area (µm²), then log1p; one
   # constant for every sample and the merged object (like Seurat scale.factor)
   target_area: 100
@@ -134,6 +139,19 @@ azimuth:
   # no Mzb1 in normal skin)
   min_prediction_score: 0.5
   dims: 50
+
+# cell types per method on the tissue (rule xenium_celltype_methods_all,
+# rules/celltype_methods.smk): Azimuth plus label transfers run per merge
+# group with src/submit_tangram.sh / src/submit_seurat_transfer.sh
+celltype_methods:
+  # method -> predictions CSV; {group} is the sample's merge group
+  transfer:
+    tangram: "output/xenium/tangram/{group}_predictions.csv"
+    seurat_sct: "output/xenium/seurat_transfer/{group}_predictions_sct.csv"
+  # transfer label column (reference obs column)
+  label: "cell_type_015"
+  # score below which a cell is "unassigned" (every method)
+  min_score: 0.5
 
 # scVI integration parameters
 min_genes: 200

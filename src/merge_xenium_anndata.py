@@ -26,7 +26,7 @@ import os
 import anndata as ad
 import scanpy as sc
 
-from xenium_to_anndata import cell_size_normalize, embed_and_cluster
+from xenium_to_anndata import cell_size_normalize, drop_none, embed_and_cluster
 
 OBS_KEEP = ["sample_id", "x_centroid", "y_centroid", "cell_area", "nucleus_area",
             "nucleus_count", "xenium_total_counts", "n_genes_by_counts",
@@ -82,6 +82,7 @@ def main():
         "batch_correction": args.batch_correction,
     }
 
+    drop_none(adata.uns)
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     adata.write_h5ad(args.out, compression="gzip")
     print(f"merged {adata.obs['sample_id'].nunique()} samples: {adata.n_obs} cells, "

@@ -119,6 +119,17 @@ def get_xenium_samples():
 
 XENIUM_SAMPLES = get_xenium_samples()
 
+# per-slide Leiden resolution overrides (xenium.leiden_resolution_by_slide) for
+# merged objects whose samples all come from one slide; other merge groups,
+# unlisted slides and per-sample objects use xenium.leiden_resolution
+LEIDEN_RESOLUTION_BY_SLIDE = {str(slide): float(res) for slide, res in
+                              (XENIUM.get("leiden_resolution_by_slide") or {}).items()}
+_unknown_slides = (set(LEIDEN_RESOLUTION_BY_SLIDE)
+                   - {s["slide"] for s in XENIUM_SAMPLES.values()})
+if _unknown_slides:
+    print(f"WARNING: xenium.leiden_resolution_by_slide lists slides with no "
+          f"detected samples: {sorted(_unknown_slides)} (quote slide ids in YAML)")
+
 # Print detected samples for debugging
 print(f"Xenium samples ({len(XENIUM_SAMPLES)}): {sorted(XENIUM_SAMPLES)}")
 print(f"Auto-detected samples: {auto_samples}")
@@ -225,6 +236,15 @@ def merge_group_samples(group):
     return samples
 
 
+def merge_leiden_resolution(wildcards):
+    """Params function: Leiden resolution for a merge group, by its slide."""
+    slides = {XENIUM_SAMPLES[s]["slide"] for s in merge_group_samples(wildcards.group)}
+    default = XENIUM.get("leiden_resolution", 0.3)
+    if len(slides) != 1:
+        return default
+    return LEIDEN_RESOLUTION_BY_SLIDE.get(slides.pop(), default)
+
+
 # Rule: the samples of one merge group in one AnnData, re-normalized from raw
 # counts with the same fixed xenium.target_area; xenium.batch_correction
 # (none | harmony) sets whether the embedding is corrected over sample_id;
@@ -242,7 +262,7 @@ rule xenium_merge:
         python = XENIUM.get("python", "python"),
         target_area = XENIUM.get("target_area", 100),
         min_cells = XENIUM.get("min_cells", 5),
-        resolution = XENIUM.get("leiden_resolution", 0.3),
+        resolution = merge_leiden_resolution,
         batch_correction = XENIUM.get("batch_correction", "none")
     threads: 8
     resources:
@@ -431,6 +451,10 @@ rule xenium_anndata:
 
 # Azimuth cell type annotation (rule xenium_azimuth_all); see rules/azimuth.smk
 include: "rules/azimuth.smk"
+
+# Cell types per annotation method on the tissue (rule
+# xenium_celltype_methods_all); see rules/celltype_methods.smk
+include: "rules/celltype_methods.smk"
 
 
 # Helper function to get FASTQ files for a sample
