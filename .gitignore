@@ -32,3 +32,7 @@ docs/local/
 config.yaml
 Xenium_Project_Report.pdf
 .ipynb_checkpoints/Xenium_Project_Report-checkpoint.pdf
+
+# Apptainer image of the squidpy-dfs pixi env (rebuild with pixi run build-sif)
+envs/squidpy/*.sif
+envs/squidpy/*.sif.tmp

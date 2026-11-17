@@ -1,0 +1,49 @@
+# Apptainer image of the pixi `squidpy-dfs` environment (pixi.toml + pixi.lock
+# at the project root). A SIF is one squashfs file, so Python imports avoid the
+# per-file metadata lookups that make the env slow to start on /dfs9.
+#
+# Build from the project root (see src/submit_build_squidpy_sif.sh):
+#   apptainer build --fakeroot envs/squidpy/squidpy.sif envs/squidpy/squidpy.def
+# Rebuild whenever pixi.lock changes.
+
+Bootstrap: docker
+From: ghcr.io/prefix-dev/pixi:0.65.0
+Stage: build
+
+%files
+    pixi.toml /app/pixi.toml
+    pixi.lock /app/pixi.lock
+
+%post
+    cd /app
+    pixi install --locked -e squidpy-dfs
+    # keep the env exports and conda activate.d scripts; drop the interactive
+    # bash parts (completion sourcing, pixi() wrapper) that fail in %environment
+    pixi shell-hook -e squidpy-dfs --shell bash \
+        | grep -E '^(export |\. /app/\.pixi/envs/squidpy-dfs/etc/conda/activate\.d/)' \
+        > /shell-hook.sh
+
+
+Bootstrap: docker
+From: ubuntu:24.04
+Stage: final
+
+%files from build
+    /app/.pixi/envs/squidpy-dfs /app/.pixi/envs/squidpy-dfs
+    /shell-hook.sh /shell-hook.sh
+
+%post
+    # mount points for the HPC3 site binds (SINGULARITY_BINDPATH)
+    mkdir -p /dfs9 /dfs8 /data/homezvol1 /share
+
+%environment
+    . /shell-hook.sh
+
+%runscript
+    if [ "$#" -eq 0 ]; then
+        exec python
+    fi
+    exec "$@"
+
+%labels
+    Description pixi squidpy-dfs environment (scanpy, squidpy, anndata)
